@@ -1,0 +1,22 @@
+{
+  "id": "model-router-v1",
+  "name": "Model Router V1",
+  "description": "Conservative, auditable Sol-to-Astra model selection",
+  "categories": ["models"],
+  "activation": { "onStartup": true },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mode": { "type": "string", "enum": ["test-only", "live"], "default": "test-only" },
+      "agentIds": { "type": "array", "items": { "type": "string" }, "default": ["main"] },
+      "testSessionPrefixes": { "type": "array", "items": { "type": "string" }, "default": [] },
+      "solModel": { "type": "string", "default": "openai/gpt-5.6-sol" },
+      "astraModel": { "type": "string", "default": "openai/gpt-6-astra" },
+      "logPath": { "type": "string" },
+      "metricsPath": { "type": "string" },
+      "statePath": { "type": "string" },
+      "ownerStorePath": { "type": "string" }
+    }
+  }
+}

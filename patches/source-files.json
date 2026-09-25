@@ -1,0 +1,76 @@
+{
+  "base_commit": "3a9d69db306cd7f081e06254cb89c4bcc14a7107",
+  "patch_sha256": "2edfca1bd7e1ec9d32e3afeba2ec65a7cb99e6580703c4c65f989fcac77025f8",
+  "files": [
+    {
+      "path": "docs/plugins/architecture.md",
+      "original_sha256": "d33a84546599fafc73f2101d2c3ef1fc2399569544cd5d2e6793a9c316fcc8b4",
+      "patched_sha256": "03410620fcb633e1c2159c044809bc07e1d1f9d93ed8c4b6b9664ce7bfabfd30"
+    },
+    {
+      "path": "src/agents/cli-runner.ts",
+      "original_sha256": "a051cac556e7a4246c8fd91e06dca28c8f116990cff0de94efc9764d1d262d5f",
+      "patched_sha256": "10079a30ccb22ab440c4116a77395e6820b1e3a41a8afe1245c9d729ac854098"
+    },
+    {
+      "path": "src/agents/command/attempt-execution.cli.test.ts",
+      "original_sha256": "cc756853e1a70143f4c31bff9faab941231b27debdffadeec67b3693bd34cd33",
+      "patched_sha256": "090f5e2c6a775a050249abb369793ed5821a34b1eab06e836c9c55c936567753"
+    },
+    {
+      "path": "src/agents/command/attempt-execution.ts",
+      "original_sha256": "a0340e42265e9bf441f3e171aa8b749eea0464cbbeb5b91b8a5b827d131aa63f",
+      "patched_sha256": "5ec337e5133921a3ce8d24d737511108803aff41301c0b4008a5342411afe753"
+    },
+    {
+      "path": "src/agents/embedded-agent-runner/run.owner-hook-context.integration.test.ts",
+      "original_sha256": null,
+      "patched_sha256": "c1cba8dc133b393f862e150a3cf73153aee36f352f0ef475f1ee0925996b52e1"
+    },
+    {
+      "path": "src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts",
+      "original_sha256": "c2bcaabcbffb838198bde49537e1fdc4872e648445f33dd34426c2cff9f4217b",
+      "patched_sha256": "a4443a698aa55941a290a73077d57774bcb2b6954c832c4ffa42cd54f695c692"
+    },
+    {
+      "path": "src/agents/embedded-agent-runner/run/attempt-before-agent-run.ts",
+      "original_sha256": "18fe81c5c403ecc17b87a0359ae8712c3fa25199ccb1e005d7299285d7cce6d5",
+      "patched_sha256": "51b20adb629ec9357b9f9b20714c5022dc7eb4880e2fb750be00a7d9e09c0dcb"
+    },
+    {
+      "path": "src/agents/embedded-agent-runner/run/run-attempt-dispatch.ts",
+      "original_sha256": "65533742feba5b12992511beee1297bf3ecef28eab0b5c73129241936223430e",
+      "patched_sha256": "4400c39016edebad9421343af35872c1a3f73df81d49b4e7eb9fbd0f5d209198"
+    },
+    {
+      "path": "src/agents/embedded-agent-runner/run/types.ts",
+      "original_sha256": "fd7eeb53424948444772977cc7c76a2d33b3dc7850a033b766af7b54a4e5faed",
+      "patched_sha256": "624aad07befb3164b9bbb5d802d76cd21b417eb5a2e5056091d132d2ee6a20c6"
+    },
+    {
+      "path": "src/agents/harness/hook-context.ts",
+      "original_sha256": "cdc12aab7f85953be6ae540ecf75a083baeb1c0e0f3a0d61723d73c366c2d7e0",
+      "patched_sha256": "fd6b7869a00f3ea7b5fd1c0dcfc72617df6441d04467705185191347b77c6171"
+    },
+    {
+      "path": "src/agents/harness/lifecycle-hook-helpers.test.ts",
+      "original_sha256": "7972404146e0681d15bc631246a5d6deadb5d214a93ff3629f4147a10148c7ed",
+      "patched_sha256": "2c9e966bfa8098f3b39fd39d6266a945b7807c05ea11b21968b09400e25e8383"
+    },
+    {
+      "path": "src/plugins/hook-agent-context.test.ts",
+      "original_sha256": "d53aae81be65a00c98bb1291dcafdfa85781d3812490a0c1d1e867614060219d",
+      "patched_sha256": "cec03c71ed26519e49d26cd97baccd759d7d203dde677935f3ea6c62d3a8442e"
+    },
+    {
+      "path": "src/plugins/hook-agent-context.ts",
+      "original_sha256": "a1cf442a98a0445b5366887df4fb46257c8edae8c9996eb89694ad574f853ab3",
+      "patched_sha256": "3fc3533d17c0f45d023b5173ed37bae25f47c3554aae7effa3a72b391960fb33"
+    },
+    {
+      "path": "src/plugins/hook-types.ts",
+      "original_sha256": "6bb3050cd9424ef0ff24e9851d85ad86fe420809d9871e1cb0b3794ec2daad8b",
+      "patched_sha256": "0fd518a4274ef1f0c88fa13378f1a20469c35f7f2d6722a5ac7c6dbdd1e5d877"
+    }
+  ]
+}

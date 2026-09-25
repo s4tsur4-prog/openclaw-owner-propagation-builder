@@ -1,0 +1,14 @@
+{
+  "index.js": "20e481e6756a3991f24a940fae6134cd4821a4c2971f72d95065f66f9a62baa5",
+  "owner.js": "d120e3324f44152778b58070c9f7fdce30808037f17f191f237557bcf79f1b9f",
+  "router.js": "f78a6579d80aabb92fee02d641382685d3b6b342d6638a66ee3f9134ba0ab632",
+  "pilot.js": "49427e24dd437b13dfd3749ddbbf7b3db8bea19c3f766f580a28033626e46def",
+  "decision.js": "17de09bf526a27582ae0480739481aed663ebd67a59679a93f74d7e12a79a499",
+  "openclaw.plugin.json": "199e07cf8ddb08a175dd210d7e265b133b9d7447d15cb0ab13bb1f0fa8429386",
+  "package.json": "b82d3dbc59f6552db0fcbaecff18d3695df9613dc12cf02a870b5b9c8c1bbaba",
+  "test/pilot.test.js": "853373eb564b3db81648810f88674c5924e9b63665c82b877655abc1159ea754",
+  "test/owner-decision.test.js": "202260fa7476d0fcf1c5f025c0df9cc2fea6c597f7e160f8e72252a2abdea8cc",
+  "test/router.test.js": "4c01aea1d6097cffae93755ad4088ccddad5662cf0f8fba4fb7323446c2d5470",
+  "test/plugin-lifecycle.test.js": "46d8ca03a1443c69832ce4af98d849907b4c3b970b4e3eab311cae73d5f67537",
+  "test/failure-classification.test.js": "18579a319597b0163cbfa69d8a22530932c11990a81c1a36e601ee7567367667"
+}

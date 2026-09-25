@@ -1,0 +1,19 @@
+{
+  "name": "model-router-v1",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "peerDependencies": {
+    "openclaw": ">=2026.9.4"
+  },
+  "openclaw": {
+    "extensions": ["./index.js"],
+    "compat": {
+      "pluginApi": ">=2026.9.4",
+      "minGatewayVersion": "2026.9.4"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

@@ -1,0 +1,607 @@
+diff --git a/docs/plugins/architecture.md b/docs/plugins/architecture.md
+index 82f43e67..0ac45ff4 100644
+--- a/docs/plugins/architecture.md
++++ b/docs/plugins/architecture.md
+@@ -29,6 +29,29 @@ This is the **deep architecture reference** for the OpenClaw plugin system. For
+   </Card>
+ </CardGroup>
+ 
++## Current-run owner context
++
++Agent lifecycle hooks expose optional `ctx.senderIsOwner`. Core projects its
++existing authoritative decision before `before_model_resolve` and onto the
++shared context used by embedded/CLI `before_agent_run`. `true` means the current
++user run was resolved as owner; `false` means non-owner; an absent field means
++unknown and must never authorize an owner-only action.
++
++This field is not reconstructed from names, sender IDs, allowlists, session keys,
++previous turns, or stored plugin bindings. Scheduled turns (including restored
++cron continuations), heartbeat, internal/inter-session handoffs, and child runs
++do not inherit this hook authority. A later human message in a child session
++also remains unknown while the run carries `spawnedBy`. A resumed ordinary
++session uses only the new run's decision. Existing local CLI operator resolution
++is unchanged; this field does not mean that a channel sender was authenticated.
++
++Hook producers that do not project this optional field remain unknown. The
++native harness's downstream hooks may omit it; the common model-resolution and
++reply-claim gates run before harness submission. Plugins must use a supported
++pre-submission gate to block work: throwing from `before_model_resolve` is not a
++blocking contract. This projection does not change tool authorization or grant
++new inherited execution capabilities.
++
+ ## Public capability model
+ 
+ Capabilities are the public **native plugin** model inside OpenClaw. Native plugins can register one or more capability types:
+diff --git a/src/agents/cli-runner.ts b/src/agents/cli-runner.ts
+index 94dc1ba6..be432944 100644
+--- a/src/agents/cli-runner.ts
++++ b/src/agents/cli-runner.ts
+@@ -636,7 +636,7 @@ async function runPreparedCliAgentOwned(
+             channelId: hookContext.channelId,
+             accountId: params.agentAccountId,
+             senderId: params.senderId ?? undefined,
+-            senderIsOwner: params.senderIsOwner ?? undefined,
++            senderIsOwner: hookContext.senderIsOwner,
+           },
+           buildAgentHookContext(hookContext),
+         );
+diff --git a/src/agents/command/attempt-execution.cli.test.ts b/src/agents/command/attempt-execution.cli.test.ts
+index 8e947455..0e063f61 100644
+--- a/src/agents/command/attempt-execution.cli.test.ts
++++ b/src/agents/command/attempt-execution.cli.test.ts
+@@ -2985,7 +2985,11 @@ describe("CLI attempt execution", () => {
+       sessionKey,
+       body: "route this",
+       runId: "run-cli-channel-context",
+-      opts: { messageProvider: "discord-voice" },
++      opts: {
++        messageProvider: "discord-voice",
++        bootstrapContextRunKind: "cron",
++        senderIsOwner: true,
++      },
+       runContext: {
+         currentChannelId: "channel:voice-room",
+         chatId: "voice-room",
+@@ -3002,6 +3006,7 @@ describe("CLI attempt execution", () => {
+     expect(runCliAgentMock).toHaveBeenCalledTimes(1);
+     expectMockArgFields(runCliAgentMock, {
+       trigger: "user",
++      bootstrapContextRunKind: "cron",
+       messageChannel: "discord",
+       messageProvider: "discord-voice",
+       currentChannelId: "channel:voice-room",
+@@ -3011,6 +3016,7 @@ describe("CLI attempt execution", () => {
+         chat: { id: "voice-room" },
+       },
+       senderId: "sender-voice",
++      senderIsOwner: true,
+     });
+   });
+ 
+diff --git a/src/agents/command/attempt-execution.ts b/src/agents/command/attempt-execution.ts
+index 984d2a8a..7f3738c9 100644
+--- a/src/agents/command/attempt-execution.ts
++++ b/src/agents/command/attempt-execution.ts
+@@ -1056,6 +1056,7 @@ export function runAgentAttempt(params: {
+             contextWindow: params.sessionEntry?.contextWindow,
+             agentId: params.sessionAgentId,
+             trigger: "user",
++            bootstrapContextRunKind: params.opts.bootstrapContextRunKind,
+             sessionFile: params.sessionFile,
+             storePath: params.storePath,
+             persistAssistantTranscript:
+diff --git a/src/agents/embedded-agent-runner/run.owner-hook-context.integration.test.ts b/src/agents/embedded-agent-runner/run.owner-hook-context.integration.test.ts
+new file mode 100644
+index 00000000..bfc5d279
+--- /dev/null
++++ b/src/agents/embedded-agent-runner/run.owner-hook-context.integration.test.ts
+@@ -0,0 +1,116 @@
++import { afterEach, beforeEach, describe, expect, it } from "vitest";
++import { buildAgentHookContextChannelFields } from "../../plugins/hook-agent-context.js";
++import type { OpenClawTestState } from "../../test-utils/openclaw-test-state.js";
++import { makeAttemptResult } from "./run.overflow-compaction.fixture.js";
++import {
++  createOverflowRunParams,
++  loadRunOverflowCompactionHarness,
++  mockedBuildEmbeddedRunPayloads,
++  mockedGlobalHookRunner,
++  mockedRunEmbeddedAttempt,
++  resetSharedRunIntegrationHarnessMocks,
++  useOpenAIPlatformAuthFixture,
++} from "./run.overflow-compaction.harness.js";
++import type { RunEmbeddedAgentInternalParams } from "./run/internal-params.js";
++
++const { runEmbeddedAgent } = await loadRunOverflowCompactionHarness();
++let state: OpenClawTestState;
++
++describe("runEmbeddedAgent current-run owner hook authority", () => {
++  beforeEach(async () => {
++    resetSharedRunIntegrationHarnessMocks();
++    const { createOpenClawTestState } = await import("../../test-utils/openclaw-test-state.js");
++    state = await createOpenClawTestState({ label: "owner-hook-context" });
++    useOpenAIPlatformAuthFixture();
++    mockedGlobalHookRunner.hasHooks.mockImplementation((name) => name === "before_model_resolve");
++    mockedBuildEmbeddedRunPayloads.mockReturnValue([{ text: "OK" }]);
++    mockedRunEmbeddedAttempt.mockResolvedValue(makeAttemptResult({ assistantTexts: ["OK"] }));
++  });
++
++  afterEach(async () => {
++    await state?.cleanup();
++  });
++
++  async function run(overrides: Partial<RunEmbeddedAgentInternalParams> = {}) {
++    await runEmbeddedAgent({
++      ...createOverflowRunParams(state),
++      provider: "openai",
++      model: "test-model",
++      messageProvider: "telegram",
++      agentAccountId: "account-a",
++      senderId: "sender-a",
++      trigger: "user",
++      ...overrides,
++    });
++    expect(mockedRunEmbeddedAttempt).toHaveBeenCalled();
++    const context = mockedGlobalHookRunner.runBeforeModelResolve.mock.lastCall?.[1];
++    expect(context).toBeDefined();
++    const dispatchedAttempt = mockedRunEmbeddedAttempt.mock.lastCall?.[0];
++    expect(dispatchedAttempt).toBeDefined();
++    expect(buildAgentHookContextChannelFields(dispatchedAttempt!).senderIsOwner).toBe(
++      context!.senderIsOwner,
++    );
++    return context!;
++  }
++
++  it.each([true, false, undefined])(
++    "projects the current inbound decision %s before model resolution",
++    async (senderIsOwner) => {
++      const context = await run({ senderIsOwner });
++      expect(context.senderIsOwner).toBe(senderIsOwner);
++      expect(context).toMatchObject({ accountId: "account-a", senderId: "sender-a" });
++    },
++  );
++
++  it("does not retain owner authority across runs in the same resumed session", async () => {
++    const owner = await run({ runId: "owner", senderIsOwner: true });
++    const nonOwner = await run({ runId: "non-owner", senderId: "sender-b", senderIsOwner: false });
++    const unknown = await run({ runId: "resumed-unknown", senderIsOwner: undefined });
++    expect(owner.senderIsOwner).toBe(true);
++    expect(nonOwner.senderIsOwner).toBe(false);
++    expect(unknown.senderIsOwner).toBeUndefined();
++    expect(mockedGlobalHookRunner.runBeforeModelResolve).toHaveBeenCalledTimes(3);
++  });
++
++  it("does not borrow authority across channel or account boundaries", async () => {
++    const owner = await run({ runId: "account-a-owner", senderIsOwner: true });
++    const otherAccount = await run({
++      runId: "account-b",
++      agentAccountId: "account-b",
++      senderIsOwner: false,
++    });
++    const otherChannel = await run({ runId: "other-channel", messageProvider: "discord" });
++    expect(owner).toMatchObject({ accountId: "account-a", senderIsOwner: true });
++    expect(otherAccount).toMatchObject({ accountId: "account-b", senderIsOwner: false });
++    expect(otherChannel.messageProvider).toBe("discord");
++    expect(otherChannel.senderIsOwner).toBeUndefined();
++  });
++
++  it.each(["cron", "heartbeat", "manual", "memory", "overflow"] as const)(
++    "withholds stale owner input on a %s run",
++    async (trigger) => {
++      expect((await run({ trigger, senderIsOwner: true })).senderIsOwner).toBeUndefined();
++    },
++  );
++
++  it.each([
++    { kind: "internal_system", sourceTool: "main_session_restart_recovery" },
++    { kind: "inter_session", sourceTool: "sessions_spawn" },
++    { kind: "internal_system", sourceTool: "internal-handoff" },
++  ] as const)("withholds owner authority for $sourceTool provenance", async (inputProvenance) => {
++    expect((await run({ inputProvenance, senderIsOwner: true })).senderIsOwner).toBeUndefined();
++  });
++
++  it.each([
++    { bootstrapContextRunKind: "cron" },
++    { spawnedBy: "agent:main:parent" },
++    { lane: "subagent" },
++  ] satisfies Partial<RunEmbeddedAgentInternalParams>[])(
++    "withholds inherited authority for internal run facts %j",
++    async (facts) => {
++      expect(
++        (await run({ ...facts, trigger: "user", senderIsOwner: true })).senderIsOwner,
++      ).toBeUndefined();
++    },
++  );
++});
+diff --git a/src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts b/src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts
+index db97773a..77b2befb 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts
+@@ -1,4 +1,5 @@
+ import { describe, expect, it, vi } from "vitest";
++import { buildAgentHookContextChannelFields } from "../../../plugins/hook-agent-context.js";
+ import type { GlobalHookRunnerRegistry } from "../../../plugins/hook-registry.types.js";
+ import type {
+   PluginHookAgentContext,
+@@ -10,6 +11,7 @@ import type { AgentMessage } from "../../runtime/index.js";
+ import { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
+ import { SessionManager } from "../../sessions/index.js";
+ import { runEmbeddedAttemptBeforeAgentRun } from "./attempt-before-agent-run.js";
++import type { EmbeddedRunAttemptParams } from "./types.js";
+ 
+ function createRegistry(hooks: PluginHookRegistration[] = []): GlobalHookRunnerRegistry {
+   return { hooks: [], typedHooks: hooks, plugins: [] };
+@@ -68,6 +70,66 @@ function createInput(hooks: PluginHookRegistration[] = []) {
+ }
+ 
+ describe("runEmbeddedAttemptBeforeAgentRun", () => {
++  it.each([true, false, undefined])(
++    "keeps event and shared context consistent for authority %s",
++    async (senderIsOwner) => {
++      const handler = vi.fn(
++        async (_event: PluginHookBeforeAgentRunEvent, _context: PluginHookAgentContext) => ({
++          outcome: "pass" as const,
++        }),
++      );
++      const { input } = createInput([
++        { pluginId: "owner-policy", hookName: "before_agent_run", handler, source: "test" },
++      ]);
++      const attempt = { ...input.attempt, senderIsOwner, trigger: "user" as const };
++      await runEmbeddedAttemptBeforeAgentRun({
++        ...input,
++        attempt,
++        hookContext: { ...hookContext, ...buildAgentHookContextChannelFields(attempt) },
++      });
++      expect(handler).toHaveBeenCalledWith(
++        expect.objectContaining({ senderIsOwner }),
++        expect.objectContaining(senderIsOwner === undefined ? {} : { senderIsOwner }),
++      );
++      const call = handler.mock.calls[0];
++      expect(call[0].senderIsOwner).toBe(call[1].senderIsOwner);
++    },
++  );
++
++  it.each([
++    { trigger: "cron" },
++    { trigger: "heartbeat" },
++    {
++      trigger: "user",
++      inputProvenance: { kind: "internal_system", sourceTool: "main_session_restart_recovery" },
++    },
++    { trigger: "user", inputProvenance: { kind: "inter_session", sourceTool: "sessions_spawn" } },
++    { trigger: "user", bootstrapContextRunKind: "cron" },
++    { trigger: "user", spawnedBy: "agent:main:parent" },
++    { trigger: "user", lane: "subagent" },
++  ] satisfies Partial<EmbeddedRunAttemptParams>[])(
++    "does not expose inherited true in event or context: %j",
++    async (facts) => {
++      const handler = vi.fn(
++        async (_event: PluginHookBeforeAgentRunEvent, _context: PluginHookAgentContext) => ({
++          outcome: "pass" as const,
++        }),
++      );
++      const { input } = createInput([
++        { pluginId: "owner-policy", hookName: "before_agent_run", handler, source: "test" },
++      ]);
++      const attempt = { ...input.attempt, ...facts, senderIsOwner: true };
++      await runEmbeddedAttemptBeforeAgentRun({
++        ...input,
++        attempt,
++        hookContext: { ...hookContext, ...buildAgentHookContextChannelFields(attempt) },
++      });
++      expect(handler).toHaveBeenCalledOnce();
++      expect(handler.mock.calls[0][0].senderIsOwner).toBeUndefined();
++      expect(handler.mock.calls[0][1].senderIsOwner).toBeUndefined();
++    },
++  );
++
+   it("does nothing when no gate is registered", async () => {
+     const { input, lock, sessionManager } = createInput();
+ 
+diff --git a/src/agents/embedded-agent-runner/run/attempt-before-agent-run.ts b/src/agents/embedded-agent-runner/run/attempt-before-agent-run.ts
+index eab9f4e9..896fc5df 100644
+--- a/src/agents/embedded-agent-runner/run/attempt-before-agent-run.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-before-agent-run.ts
+@@ -1,3 +1,4 @@
++import { buildAgentHookContextOwnerFields } from "../../../plugins/hook-agent-context.js";
+ /**
+  * Runs the fail-closed before_agent_run gate and persists blocked turns.
+  */
+@@ -29,7 +30,15 @@ type BeforeAgentRunBlockOutcome = {
+ export async function runEmbeddedAttemptBeforeAgentRun(input: {
+   attempt: Pick<
+     EmbeddedRunAttemptParams,
+-    "agentAccountId" | "runId" | "senderId" | "senderIsOwner"
++    | "agentAccountId"
++    | "runId"
++    | "senderId"
++    | "senderIsOwner"
++    | "trigger"
++    | "inputProvenance"
++    | "bootstrapContextRunKind"
++    | "spawnedBy"
++    | "lane"
+   >;
+   activeSession: BeforeAgentRunSession;
+   hookContext: HookContext;
+@@ -97,7 +106,7 @@ export async function runEmbeddedAttemptBeforeAgentRun(input: {
+         channelId: input.hookContext.channelId,
+         accountId: input.attempt.agentAccountId ?? undefined,
+         senderId: input.attempt.senderId ?? undefined,
+-        senderIsOwner: input.attempt.senderIsOwner ?? undefined,
++        senderIsOwner: buildAgentHookContextOwnerFields(input.attempt).senderIsOwner,
+       },
+       input.hookContext,
+     );
+diff --git a/src/agents/embedded-agent-runner/run/run-attempt-dispatch.ts b/src/agents/embedded-agent-runner/run/run-attempt-dispatch.ts
+index 82abf696..d92a42cb 100644
+--- a/src/agents/embedded-agent-runner/run/run-attempt-dispatch.ts
++++ b/src/agents/embedded-agent-runner/run/run-attempt-dispatch.ts
+@@ -418,6 +418,7 @@ export async function prepareAndDispatchEmbeddedRunAttempt(input: {
+     senderUsername: params.senderUsername,
+     senderE164: params.senderE164,
+     senderIsOwner: params.senderIsOwner,
++    lane: params.lane,
+     approvalReviewerDeviceId: params.approvalReviewerDeviceId,
+     currentChannelId: params.currentChannelId,
+     chatId: params.chatId,
+diff --git a/src/agents/embedded-agent-runner/run/types.ts b/src/agents/embedded-agent-runner/run/types.ts
+index 7216f0b4..1cf983e3 100644
+--- a/src/agents/embedded-agent-runner/run/types.ts
++++ b/src/agents/embedded-agent-runner/run/types.ts
+@@ -78,7 +78,6 @@ type EmbeddedRunAttemptBase = Omit<
+   | "authProfileIdSource"
+   | "thinkLevel"
+   | "fastMode"
+-  | "lane"
+   | "enqueue"
+   | "sessionFile"
+   | "preparedRunAdmission"
+diff --git a/src/agents/harness/hook-context.ts b/src/agents/harness/hook-context.ts
+index e029199c..a862c93b 100644
+--- a/src/agents/harness/hook-context.ts
++++ b/src/agents/harness/hook-context.ts
+@@ -3,7 +3,10 @@
+  */
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
+ import type { DiagnosticTraceContext } from "../../infra/diagnostic-trace-context.js";
+-import { buildAgentHookContextIdentityFields } from "../../plugins/hook-agent-context.js";
++import {
++  buildAgentHookContextIdentityFields,
++  buildAgentHookContextOwnerFields,
++} from "../../plugins/hook-agent-context.js";
+ import type {
+   PluginHookAgentContext,
+   PluginHookChannelContext,
+@@ -36,6 +39,10 @@ export type AgentHarnessHookContext = {
+   contextWindowReferenceTokens?: number;
+   config?: OpenClawConfig;
+   senderId?: string;
++  senderIsOwner?: boolean;
++  bootstrapContextRunKind?: string;
++  spawnedBy?: string | null;
++  lane?: string;
+   chatId?: string;
+   channel?: string;
+   channelContext?: PluginHookChannelContext;
+@@ -44,6 +51,7 @@ export type AgentHarnessHookContext = {
+ /** Builds the sparse hook context object passed to agent harness plugin hooks. */
+ export function buildAgentHookContext(params: AgentHarnessHookContext): PluginHookAgentContext {
+   return {
++    ...buildAgentHookContextOwnerFields(params),
+     ...(params.runId ? { runId: params.runId } : {}),
+     ...(params.trace ? { trace: params.trace } : {}),
+     ...(params.jobId ? { jobId: params.jobId } : {}),
+diff --git a/src/agents/harness/lifecycle-hook-helpers.test.ts b/src/agents/harness/lifecycle-hook-helpers.test.ts
+index 3e41be0c..b87f0c74 100644
+--- a/src/agents/harness/lifecycle-hook-helpers.test.ts
++++ b/src/agents/harness/lifecycle-hook-helpers.test.ts
+@@ -1,5 +1,6 @@
+ // Exercises harness lifecycle hook adapters and finalize-retry budget semantics.
+ import { afterEach, describe, expect, it, vi } from "vitest";
++import { buildAgentHookContext, type AgentHarnessHookContext } from "./hook-context.js";
+ import {
+   awaitAgentHarnessAgentEndHook,
+   runAgentHarnessAgentEndHook,
+@@ -27,6 +28,35 @@ const EVENT = {
+   success: true,
+ };
+ 
++describe("native harness owner authority context", () => {
++  it.each([true, false, undefined])(
++    "preserves current user authority %s across context construction",
++    (senderIsOwner) => {
++      const input = { runId: "run-owner", senderId: "sender", senderIsOwner, trigger: "user" };
++      const context = buildAgentHookContext(input);
++      expect(context.senderIsOwner).toBe(senderIsOwner);
++      expect(buildAgentHookContext(context).senderIsOwner).toBe(senderIsOwner);
++    },
++  );
++
++  it.each([
++    { trigger: "cron" },
++    { trigger: "heartbeat" },
++    { inputProvenance: { kind: "internal_system" } },
++    { inputProvenance: { kind: "inter_session" } },
++    { bootstrapContextRunKind: "cron" },
++    { spawnedBy: "agent:main:parent" },
++    { lane: "subagent" },
++  ] satisfies AgentHarnessHookContext[])(
++    "does not restore authority after a restricted context roundtrip: %j",
++    (facts) => {
++      const context = buildAgentHookContext({ trigger: "user", senderIsOwner: true, ...facts });
++      expect(context.senderIsOwner).toBeUndefined();
++      expect(buildAgentHookContext(context).senderIsOwner).toBeUndefined();
++    },
++  );
++});
++
+ describe("agent harness lifecycle hook helpers", () => {
+   afterEach(() => {
+     Reflect.deleteProperty(globalThis, Symbol.for("openclaw.pluginFinalizeRetryBudget"));
+diff --git a/src/plugins/hook-agent-context.test.ts b/src/plugins/hook-agent-context.test.ts
+index 5eec8d57..66ae69c5 100644
+--- a/src/plugins/hook-agent-context.test.ts
++++ b/src/plugins/hook-agent-context.test.ts
+@@ -3,8 +3,65 @@ import { describe, expect, it } from "vitest";
+ import {
+   buildAgentHookContextChannelFields,
+   buildAgentHookContextIdentityFields,
++  buildAgentHookContextOwnerFields,
+ } from "./hook-agent-context.js";
+ 
++describe("buildAgentHookContextOwnerFields", () => {
++  it.each([true, false])(
++    "preserves an explicit current user authority decision %s",
++    (senderIsOwner) => {
++      expect(buildAgentHookContextOwnerFields({ senderIsOwner })).toEqual({ senderIsOwner });
++      expect(
++        buildAgentHookContextOwnerFields({
++          senderIsOwner,
++          trigger: "user",
++          inputProvenance: { kind: "external_user" },
++        }),
++      ).toEqual({ senderIsOwner });
++    },
++  );
++
++  it("leaves missing authority sparse and does not infer it from identity", () => {
++    expect(buildAgentHookContextOwnerFields({})).toEqual({});
++    expect(
++      buildAgentHookContextChannelFields({
++        senderId: "owner",
++        sessionKey: "agent:main:telegram:direct:owner",
++      }).senderIsOwner,
++    ).toBeUndefined();
++  });
++
++  it.each(["cron", "heartbeat", "memory", "overflow", "manual", "subagent", "internal"])(
++    "withholds stale true for trigger %s",
++    (trigger) => {
++      expect(buildAgentHookContextOwnerFields({ senderIsOwner: true, trigger })).toEqual({});
++    },
++  );
++
++  it.each(["internal_system", "inter_session"] as const)(
++    "withholds stale true for provenance %s",
++    (kind) => {
++      expect(
++        buildAgentHookContextOwnerFields({
++          senderIsOwner: true,
++          trigger: "user",
++          inputProvenance: { kind },
++        }),
++      ).toEqual({});
++    },
++  );
++
++  it.each([
++    { bootstrapContextRunKind: "cron" },
++    { spawnedBy: "agent:main:parent" },
++    { lane: "subagent" },
++  ])("does not treat internal user-shaped runs as owner: %j", (facts) => {
++    expect(
++      buildAgentHookContextOwnerFields({ ...facts, senderIsOwner: true, trigger: "user" }),
++    ).toEqual({});
++  });
++});
++
+ describe("buildAgentHookContextChannelFields", () => {
+   it("keeps provider and conversation id separate", () => {
+     expect(
+diff --git a/src/plugins/hook-agent-context.ts b/src/plugins/hook-agent-context.ts
+index 47d10af3..b27884dc 100644
+--- a/src/plugins/hook-agent-context.ts
++++ b/src/plugins/hook-agent-context.ts
+@@ -6,6 +6,35 @@ import type { PluginHookAgentContext } from "./hook-types.js";
+ 
+ const TARGET_PREFIXES = new Set(["channel", "chat", "direct", "dm", "group", "thread", "user"]);
+ 
++type AgentHookOwnerInput = {
++  senderIsOwner?: boolean;
++  trigger?: string;
++  inputProvenance?: PluginHookAgentContext["inputProvenance"];
++  bootstrapContextRunKind?: string;
++  spawnedBy?: string | null;
++  lane?: string;
++};
++
++/** Projects an existing decision, never deriving owner authority from identity or session state. */
++export function buildAgentHookContextOwnerFields(
++  params: AgentHookOwnerInput,
++): Pick<PluginHookAgentContext, "senderIsOwner"> {
++  // Scheduled continuations can use trigger=user, and child runs can retain
++  // requester metadata. Neither is a fresh owner-authorized user turn.
++  if (
++    (params.trigger !== undefined && params.trigger !== "user") ||
++    (params.inputProvenance !== undefined && params.inputProvenance.kind !== "external_user") ||
++    (params.bootstrapContextRunKind !== undefined &&
++      params.bootstrapContextRunKind !== "default") ||
++    params.spawnedBy ||
++    params.lane === "subagent" ||
++    typeof params.senderIsOwner !== "boolean"
++  ) {
++    return {};
++  }
++  return { senderIsOwner: params.senderIsOwner };
++}
++
+ function normalizeKey(value: string | undefined): string {
+   return (value ?? "").trim().toLowerCase();
+ }
+@@ -101,17 +130,25 @@ function resolveAgentHookChannelId(params: {
+ }
+ 
+ /** Builds channel/provider fields for plugin agent hook context. */
+-export function buildAgentHookContextChannelFields(params: {
+-  sessionKey?: string | null;
+-  messageChannel?: string | null;
+-  messageProvider?: string | null;
+-  currentChannelId?: string | null;
+-  messageTo?: string | null;
+-  senderId?: string | null;
+-  agentAccountId?: string | null;
+-}): Pick<
++export function buildAgentHookContextChannelFields(
++  params: AgentHookOwnerInput & {
++    sessionKey?: string | null;
++    messageChannel?: string | null;
++    messageProvider?: string | null;
++    currentChannelId?: string | null;
++    messageTo?: string | null;
++    senderId?: string | null;
++    agentAccountId?: string | null;
++  },
++): Pick<
+   PluginHookAgentContext,
+-  "accountId" | "channel" | "channelId" | "chatId" | "messageProvider" | "senderId"
++  | "accountId"
++  | "channel"
++  | "channelId"
++  | "chatId"
++  | "messageProvider"
++  | "senderId"
++  | "senderIsOwner"
+ > {
+   const channel = resolveAgentHookChannel(params);
+   const channelId = resolveAgentHookChannelId(params);
+@@ -123,6 +160,7 @@ export function buildAgentHookContextChannelFields(params: {
+     channelId,
+     chatId: channelId,
+     senderId: normalizeOptionalString(params.senderId),
++    ...buildAgentHookContextOwnerFields(params),
+   };
+ }
+ 
+diff --git a/src/plugins/hook-types.ts b/src/plugins/hook-types.ts
+index 216a4f12..27703003 100644
+--- a/src/plugins/hook-types.ts
++++ b/src/plugins/hook-types.ts
+@@ -318,6 +318,8 @@ export type PluginHookAgentContext = {
+   chatId?: string;
+   /** Sender identity for channel-originated runs when available. */
+   senderId?: string;
++  /** Current user-run owner decision from core; absent for unknown or inherited authority. */
++  senderIsOwner?: boolean;
+   trigger?: string;
+   channelId?: string;
+   /**
