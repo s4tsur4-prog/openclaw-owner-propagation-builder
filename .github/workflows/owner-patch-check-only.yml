@@ -1,0 +1,122 @@
+name: Owner candidate check only
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/owner-patch-check-only.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: owner-patch-check-only
+  cancel-in-progress: false
+jobs:
+  check-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact candidate inputs
+        uses: actions/checkout@v4
+        with:
+          ref: 88a818f49858753eecb02a28623c4d8fb574a939
+          persist-credentials: false
+      - name: Verify public builder and record runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p receipts
+          python3 - <<'PY'
+          import json, os
+          event = json.load(open(os.environ["GITHUB_EVENT_PATH"]))
+          assert event["repository"]["private"] is False, "public standard runner only"
+          PY
+          { uname -a; lscpu; free -h; df -h; } > receipts/runner-initial.txt
+          printf 'workflow_commit=%s\nrun_id=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > receipts/workflow.txt
+      - name: Fetch and verify exact canonical source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source remote add origin https://github.com/openclaw/openclaw.git
+          git -C source fetch --depth=1 origin refs/tags/v2026.9.4:refs/tags/v2026.9.4
+          test "$(git -C source rev-parse 'v2026.9.4^{commit}')" = 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          git -C source checkout --detach 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          test "$(git -C source remote get-url origin)" = https://github.com/openclaw/openclaw.git
+          test "$(git -C source rev-parse HEAD)" = 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          test -z "$(git -C source status --porcelain)"
+          { git -C source remote -v; git -C source rev-parse HEAD; git -C source rev-parse 'v2026.9.4^{commit}'; } > receipts/source.txt
+      - name: Setup compatible pinned Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+      - name: Setup repository-pinned pnpm
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node -e 'const p=require("./package.json"); if(p.version!=="2026.9.4" || !p.packageManager.startsWith("pnpm@12.3.4+sha512.")) process.exit(1); console.log(p.engines,p.packageManager)'
+          npm install --global pnpm@12.3.4
+          test "$(pnpm --version)" = 12.3.4
+          node --version
+          pnpm --version
+      - name: Apply exact candidate and verify complete source hashes
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 88a818f49858753eecb02a28623c4d8fb574a939
+          git -C source apply --check "$PWD/patches/owner-context.patch"
+          git -C source apply "$PWD/patches/owner-context.patch"
+          cp tests/run.router-owner.integration.test.ts source/src/agents/embedded-agent-runner/
+          cp tests/run-attempt.router-owner.test.ts source/extensions/codex/src/app-server/
+          python3 scripts/export-owner-provenance.py
+          python3 - <<'PYTHON'
+          import json
+          p=json.load(open('owner-receipts/complete-source-hashes.json'))
+          assert p['applied_diff_sha256']=='eb3c96bd85c1c5b682693ae5e3b6144d09b95c09b89bbaf481f3382d38399c6a'
+          PYTHON
+          printf 'candidate_commit=88a818f49858753eecb02a28623c4d8fb574a939\n' > owner-receipts/candidate.txt
+      - name: Frozen install
+        id: install
+        run: |
+          set -uo pipefail
+          cd source
+          pnpm install --frozen-lockfile 2>&1 | tee ../owner-receipts/frozen-install.log
+          code=${PIPESTATUS[0]}
+          printf '%s\n' "$code" > ../owner-receipts/install.exit
+          exit "$code"
+      - name: Verify source unchanged by installation
+        run: |
+          set -euo pipefail
+          cp owner-receipts/complete-source-hashes.json owner-receipts/pre-install-hashes.json
+          python3 scripts/export-owner-provenance.py
+          cmp owner-receipts/pre-install-hashes.json owner-receipts/complete-source-hashes.json
+      - name: Only pnpm check
+        id: check
+        run: python3 scripts/verify-owner-patch.py check
+      - name: Preserve terminal receipt and source integrity
+        if: always()
+        env:
+          CHECK_OUTCOME: ${{ steps.check.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+        run: |
+          mkdir -p owner-receipts
+          python3 - <<'PYTHON'
+          import json,os,pathlib
+          out=pathlib.Path('owner-receipts')
+          p=out/'receipt.json'
+          r=json.loads(p.read_text()) if p.exists() else {}
+          cmds=[c for c in r.get('commands',[]) if c['name']=='check']
+          code=cmds[-1]['exit'] if cmds else None
+          status='PASS' if code==0 and os.environ['CHECK_OUTCOME']=='success' else 'INTERRUPTED_UNKNOWN' if code is None or code in [143,-15] else 'NONZERO_REQUIRES_DIAGNOSTIC'
+          (out/'check-terminal.json').write_text(json.dumps(dict(candidate='88a818f49858753eecb02a28623c4d8fb574a939',workflow_commit=os.environ['GITHUB_SHA'],run_id=os.environ['GITHUB_RUN_ID'],attempt=os.environ['GITHUB_RUN_ATTEMPT'],check_outcome=os.environ['CHECK_OUTCOME'],install_outcome=os.environ['INSTALL_OUTCOME'],check_exit=code,status=status,production='NOT DEPLOYED'),indent=2)+'\n')
+          PYTHON
+          { uname -a; free -h; df -h; } > owner-receipts/runner-final.txt
+          cp -r receipts owner-receipts/initial-runner
+          cd owner-receipts
+          find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS
+      - name: Upload check log and receipt even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owner-check-only-${{ github.run_id }}-${{ github.run_attempt }}
+          path: owner-receipts/
+          if-no-files-found: error
+          retention-days: 30
