@@ -1,0 +1,81 @@
+{
+  "source_commit": "3a9d69db306cd7f081e06254cb89c4bcc14a7107",
+  "source_tag": "3a9d69db306cd7f081e06254cb89c4bcc14a7107",
+  "source_remote": "https://github.com/openclaw/openclaw.git",
+  "workflow_commit": "b57eec8c94cd325e0c9fe406286a8118e84ee70f",
+  "run_id": "36115774056",
+  "run_attempt": "1",
+  "run_url": "https://github.com/s4tsur4-prog/openclaw-owner-propagation-builder/actions/runs/36115774056",
+  "node": "v24.21.0",
+  "pnpm": "12.3.4",
+  "os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "cpu_count": 4,
+  "sampling_seconds": 1,
+  "install_exit": 0,
+  "build_exit": 0,
+  "conclusion": "PASS",
+  "initial": {
+    "time": 1790326702.1106555,
+    "ram_total_bytes": 16766410752,
+    "ram_available_bytes": 15494148096,
+    "disk_free_bytes": 91449184256,
+    "disk_used_bytes": 63428227072,
+    "disk_total_bytes": 154894188544
+  },
+  "install_before": {
+    "time": 1790326702.3639293,
+    "ram_total_bytes": 16766410752,
+    "ram_available_bytes": 15492628480,
+    "disk_free_bytes": 91449171968,
+    "disk_used_bytes": 63428239360,
+    "disk_total_bytes": 154894188544
+  },
+  "duration_seconds": 388.76,
+  "install_after": {
+    "time": 1790326716.3789692,
+    "ram_total_bytes": 16766410752,
+    "ram_available_bytes": 15173853184,
+    "disk_free_bytes": 88405901312,
+    "disk_used_bytes": 66471510016,
+    "disk_total_bytes": 154894188544
+  },
+  "install_peak_host_used_ram_bytes_sampled": 2278903808,
+  "install_min_free_disk_bytes_sampled": 88380039168,
+  "install_peak_used_disk_bytes_sampled": 66497372160,
+  "build_before": {
+    "time": 1790326716.577584,
+    "ram_total_bytes": 16766410752,
+    "ram_available_bytes": 15173939200,
+    "disk_free_bytes": 88405889024,
+    "disk_used_bytes": 66471522304,
+    "disk_total_bytes": 154894188544
+  },
+  "build_after": {
+    "time": 1790327090.7706997,
+    "ram_total_bytes": 16766410752,
+    "ram_available_bytes": 15080648704,
+    "disk_free_bytes": 88029011968,
+    "disk_used_bytes": 66848399360,
+    "disk_total_bytes": 154894188544
+  },
+  "build_peak_host_used_ram_bytes_sampled": 7118823424,
+  "build_min_free_disk_bytes_sampled": 88029020160,
+  "build_peak_used_disk_bytes_sampled": 66848391168,
+  "tracked_diff_after": "",
+  "github_run": {
+    "id": 36115774056,
+    "status": "completed",
+    "conclusion": "success",
+    "head_sha": "b57eec8c94cd325e0c9fe406286a8118e84ee70f",
+    "created_at": "2026-09-25T08:57:48Z",
+    "run_started_at": "2026-09-25T08:57:48Z",
+    "updated_at": "2026-09-25T09:04:56Z",
+    "html_url": "https://github.com/s4tsur4-prog/openclaw-owner-propagation-builder/actions/runs/36115774056"
+  },
+  "artifact": {
+    "id": 10854939438,
+    "sha256_reported_by_github": "cc078f53acec1e8baaa479c10739e5a9f09114c4d719da9aff10683133b30549",
+    "expires_at": "2026-10-25T09:04:51Z"
+  },
+  "scope": "Unpatched source install/build only; no targeted tests, owner patch, deployment or runtime acceptance."
+}
