@@ -1,6 +1,6 @@
 {
   "base_commit": "3a9d69db306cd7f081e06254cb89c4bcc14a7107",
-  "patch_sha256": "d081a6fba2de6f255ded0787dd77cd7e17e55cde8a107302664fd49cc18b2fea",
+  "patch_sha256": "62d0ed2ec72c1ed2824198a91852b8336a91cd148f79f4ddc03cd0841a072fa8",
   "files": [
     {
       "path": "docs/plugins/architecture.md",
@@ -30,7 +30,7 @@
     {
       "path": "extensions/codex/src/app-server/run-attempt.auth-context.test.ts",
       "original_sha256": "edd30e0edb5ddfe45187f3d90b81860cb51f36bfbfc7313a64a16fc7bf7994f4",
-      "patched_sha256": "6cf5a700a20bfa21c397886f428b7c50b28c687653ccd27fd7ea0b8540b671bb"
+      "patched_sha256": "efabd9370e8651dd91158d9feabe1acb742893cb7ce54313f20ed0a1cd7964bc"
     },
     {
       "path": "src/agents/cli-runner.ts",
@@ -50,7 +50,7 @@
     {
       "path": "src/agents/embedded-agent-runner/run.owner-hook-context.integration.test.ts",
       "original_sha256": null,
-      "patched_sha256": "310c120b4e4236b5dadb42dd2030c90043b43a1d9e6a1d0321116ea09f742744"
+      "patched_sha256": "b22256e6eb0fe06661f9d8eb7cd5b14d0d7e82b1557b14dc582b769a62327f4b"
     },
     {
       "path": "src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts",

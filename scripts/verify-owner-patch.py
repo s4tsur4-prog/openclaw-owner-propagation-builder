@@ -4,6 +4,8 @@ import json
 import os
 import re
 import traceback
+import signal
+import threading
 from pathlib import Path
 import shutil
 import subprocess
@@ -56,12 +58,41 @@ def run(name, args, cwd=SOURCE, timeout=2400):
     started = time.monotonic()
     env = os.environ.copy()
     env["OPENCLAW_ROUTER_TEST_DIR"] = str(ROOT / "router")
+    print("COMMAND_START " + json.dumps({"name": name, "argv": args, "stage": STAGE}), flush=True)
     with (OUT / (name + ".log")).open("w") as log:
-        try:
-            code = subprocess.run(args, cwd=cwd, env=env, stdout=log,
-                                  stderr=subprocess.STDOUT, timeout=timeout).returncode
-        except subprocess.TimeoutExpired:
-            code = 124
+        if name == "check":
+            # Preserve preflight/type/lint diagnostics even if a hosted runner shuts down.
+            process = subprocess.Popen(args, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT, text=True, bufsize=1,
+                                       start_new_session=True)
+            def tee():
+                for line in process.stdout:
+                    log.write(line)
+                    log.flush()
+                    print(line, end="", flush=True)
+            reader = threading.Thread(target=tee, daemon=True)
+            reader.start()
+            try:
+                code = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                code = 124
+            reader.join(timeout=10)
+            if reader.is_alive():
+                os.killpg(process.pid, signal.SIGKILL)
+                reader.join(timeout=10)
+                code = 124
+        else:
+            try:
+                code = subprocess.run(args, cwd=cwd, env=env, stdout=log,
+                                      stderr=subprocess.STDOUT, timeout=timeout).returncode
+            except subprocess.TimeoutExpired:
+                code = 124
     entry = {"name": name, "argv": args, "cwd": str(cwd.relative_to(ROOT)),
              "stage": STAGE, "exit": code, "seconds": round(time.monotonic() - started, 3)}
     if name == "router-suite":
@@ -71,7 +102,8 @@ def run(name, args, cwd=SOURCE, timeout=2400):
     receipt["commands"].append(entry)
     save()
     print(json.dumps(entry), flush=True)
-    print((OUT / (name + ".log")).read_text(errors="replace")[-18000:], flush=True)
+    if name != "check":
+        print((OUT / (name + ".log")).read_text(errors="replace")[-18000:], flush=True)
     return code
 
 def assert_hashes(which):

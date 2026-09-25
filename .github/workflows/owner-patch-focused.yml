@@ -63,18 +63,69 @@ jobs:
       - name: Targeted core owner hooks and SDK
         if: ${{ always() && steps.prepare.outcome == 'success' }}
         run: python3 scripts/verify-owner-patch.py targeted
+      - name: Preserve targeted receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owner-focused-targeted-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/receipt.json
+            owner-receipts/targeted-core*
+            owner-receipts/router-core-bridge*
+          if-no-files-found: error
+          retention-days: 30
       - name: Native submission gates and Router bridge
         if: ${{ always() && steps.prepare.outcome == 'success' }}
         run: python3 scripts/verify-owner-patch.py native
+      - name: Preserve native receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owner-focused-native-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/receipt.json
+            owner-receipts/native-router-and-gates*
+          if-no-files-found: error
+          retention-days: 30
       - name: Core test types
         if: ${{ always() && steps.prepare.outcome == 'success' }}
         run: python3 scripts/verify-owner-patch.py core-types
+      - name: Preserve core-types receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owner-focused-core-types-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/receipt.json
+            owner-receipts/core-test-types*
+          if-no-files-found: error
+          retention-days: 30
       - name: Extension test types
         if: ${{ always() && steps.prepare.outcome == 'success' }}
         run: python3 scripts/verify-owner-patch.py extension-types
+      - name: Preserve extension-types receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owner-focused-extension-types-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/receipt.json
+            owner-receipts/extension-test-types*
+          if-no-files-found: error
+          retention-days: 30
       - name: Patched source check
         if: ${{ always() && steps.prepare.outcome == 'success' }}
         run: python3 scripts/verify-owner-patch.py check
+      - name: Preserve check receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owner-focused-check-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/receipt.json
+            owner-receipts/check.log
+          if-no-files-found: error
+          retention-days: 30
       - name: Focused gate summary (never package)
         if: always()
         run: python3 scripts/verify-owner-patch.py focused-summary

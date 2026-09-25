@@ -348,11 +348,12 @@ index e7b1dad2..231bb25f 100644
          await markCodexAuthProfileBlockedFromRateLimits({
            params,
 diff --git a/extensions/codex/src/app-server/run-attempt.auth-context.test.ts b/extensions/codex/src/app-server/run-attempt.auth-context.test.ts
-index 9a90dc09..fb2c464f 100644
+index 9a90dc09..8b8c146a 100644
 --- a/extensions/codex/src/app-server/run-attempt.auth-context.test.ts
 +++ b/extensions/codex/src/app-server/run-attempt.auth-context.test.ts
-@@ -1,8 +1,13 @@
+@@ -1,8 +1,14 @@
  import path from "node:path";
++import { embeddedAgentLog } from "openclaw/plugin-sdk/agent-harness-runtime";
 +import {
 +  onInternalDiagnosticEvent,
 +  waitForDiagnosticEventsDrained,
@@ -365,7 +366,7 @@ index 9a90dc09..fb2c464f 100644
  import { itemNotification } from "./protocol.test-helpers.js";
  import {
    createParams,
-@@ -32,6 +37,227 @@ describe("runCodexAppServerAttempt authenticated hook context", () => {
+@@ -32,6 +38,232 @@ describe("runCodexAppServerAttempt authenticated hook context", () => {
      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
    });
  
@@ -447,7 +448,7 @@ index 9a90dc09..fb2c464f 100644
 +    },
 +  );
 +
-+  it("preserves the hook terminal when client cleanup fails", async () => {
++  it("preserves the hook terminal when one-shot shared-client retirement is unconfirmed", async () => {
 +    initializeGlobalHookRunner(
 +      createMockPluginRegistry([
 +        {
@@ -463,13 +464,18 @@ index 9a90dc09..fb2c464f 100644
 +    params.oneShotCliRun = true;
 +    params.cleanupBundleMcpOnRunEnd = true;
 +    const harness = createStartedThreadHarness();
-+    const close = vi
-+      .spyOn(harness.client, "closeAndWait")
-+      .mockRejectedValue(new Error("cleanup failed"));
++    // This injected client is not in the shared pool. Retirement must report
++    // missing close evidence; closeAndWait is correctly not called on that path.
++    const warning = vi.spyOn(embeddedAgentLog, "warn");
 +    const result = await runCodexAppServerAttempt(params);
 +    expect(result.terminal).toMatchObject({ kind: "failed", source: "hook:before_agent_run" });
 +    expect(harness.requests.some((request) => request.method === "turn/start")).toBe(false);
-+    expect(close).toHaveBeenCalled();
++    expect(harness.requests.some((request) => request.method === "thread/unsubscribe")).toBe(true);
++    expect(warning).toHaveBeenCalledWith(
++      expect.stringContaining(
++        "step=codex-hook-block-cleanup error=Codex one-shot client cleanup could not be confirmed",
++      ),
++    );
 +  });
 +
 +  it.each([false, true])(
@@ -653,10 +659,10 @@ index 984d2a8a..7f3738c9 100644
              persistAssistantTranscript:
 diff --git a/src/agents/embedded-agent-runner/run.owner-hook-context.integration.test.ts b/src/agents/embedded-agent-runner/run.owner-hook-context.integration.test.ts
 new file mode 100644
-index 00000000..b3c91ae7
+index 00000000..706c7a14
 --- /dev/null
 +++ b/src/agents/embedded-agent-runner/run.owner-hook-context.integration.test.ts
-@@ -0,0 +1,161 @@
+@@ -0,0 +1,164 @@
 +import { afterEach, beforeEach, describe, expect, it } from "vitest";
 +import { buildAgentHookContextChannelFields } from "../../plugins/hook-agent-context.js";
 +import type { OpenClawTestState } from "../../test-utils/openclaw-test-state.js";
@@ -718,9 +724,12 @@ index 00000000..b3c91ae7
 +    expect(buildAgentHookContextChannelFields(dispatchedAttempt).senderIsOwner).toBe(
 +      context.senderIsOwner,
 +    );
-+    expect(
-+      mockedGlobalHookRunner.runBeforeModelResolve.mock.invocationCallOrder.at(-1),
-+    ).toBeLessThan(mockedRunEmbeddedAttempt.mock.invocationCallOrder.at(-1));
++    const hookOrder = mockedGlobalHookRunner.runBeforeModelResolve.mock.invocationCallOrder.at(-1);
++    const attemptOrder = mockedRunEmbeddedAttempt.mock.invocationCallOrder.at(-1);
++    if (hookOrder === undefined || attemptOrder === undefined) {
++      throw new Error("Expected recorded hook and attempt invocation order");
++    }
++    expect(hookOrder).toBeLessThan(attemptOrder);
 +    return context;
 +  }
 +
