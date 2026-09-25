@@ -1,0 +1,77 @@
+name: Exact OpenClaw baseline
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/baseline.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: exact-baseline
+  cancel-in-progress: false
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout builder
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify public builder and record runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p receipts
+          python3 - <<'PY'
+          import json, os
+          event = json.load(open(os.environ["GITHUB_EVENT_PATH"]))
+          assert event["repository"]["private"] is False, "public standard runner only"
+          PY
+          { uname -a; lscpu; free -h; df -h; } > receipts/runner-initial.txt
+          printf 'workflow_commit=%s\nrun_id=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > receipts/workflow.txt
+      - name: Fetch and verify exact canonical source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source remote add origin https://github.com/openclaw/openclaw.git
+          git -C source fetch --depth=1 origin refs/tags/v2026.9.4:refs/tags/v2026.9.4
+          test "$(git -C source rev-parse 'v2026.9.4^{commit}')" = 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          git -C source checkout --detach 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          test "$(git -C source remote get-url origin)" = https://github.com/openclaw/openclaw.git
+          test "$(git -C source rev-parse HEAD)" = 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          test -z "$(git -C source status --porcelain)"
+          { git -C source remote -v; git -C source rev-parse HEAD; git -C source rev-parse 'v2026.9.4^{commit}'; } > receipts/source.txt
+      - name: Setup compatible pinned Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+      - name: Setup repository-pinned pnpm
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node -e 'const p=require("./package.json"); if(p.version!=="2026.9.4" || !p.packageManager.startsWith("pnpm@12.3.4+sha512.")) process.exit(1); console.log(p.engines,p.packageManager)'
+          npm install --global pnpm@12.3.4
+          test "$(pnpm --version)" = 12.3.4
+          node --version
+          pnpm --version
+      - name: Frozen install and unpatched baseline build
+        run: python3 scripts/baseline.py
+      - name: Checksums for safe baseline receipts
+        if: always()
+        shell: bash
+        run: |
+          if [ -d receipts ]; then
+            cd receipts
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS
+          fi
+      - name: Upload baseline receipts only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-receipts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: receipts/
+          if-no-files-found: warn
+          retention-days: 30
