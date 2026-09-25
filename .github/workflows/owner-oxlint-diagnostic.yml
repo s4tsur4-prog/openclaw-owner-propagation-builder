@@ -1,0 +1,135 @@
+name: Owner oxlint core diagnostic
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/owner-oxlint-diagnostic.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: owner-oxlint-diagnostic
+  cancel-in-progress: false
+jobs:
+  oxlint-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact candidate inputs
+        uses: actions/checkout@v4
+        with:
+          ref: 88a818f49858753eecb02a28623c4d8fb574a939
+          persist-credentials: false
+      - name: Checkout workflow-only diagnostic tools
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: diagnostic-tools
+          sparse-checkout: scripts
+          persist-credentials: false
+      - name: Verify public builder and record runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p receipts
+          python3 - <<'PY'
+          import json, os
+          event = json.load(open(os.environ["GITHUB_EVENT_PATH"]))
+          assert event["repository"]["private"] is False, "public standard runner only"
+          PY
+          { uname -a; lscpu; free -h; df -h; } > receipts/runner-initial.txt
+          printf 'workflow_commit=%s\nrun_id=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > receipts/workflow.txt
+      - name: Fetch and verify exact canonical source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source remote add origin https://github.com/openclaw/openclaw.git
+          git -C source fetch --depth=1 origin refs/tags/v2026.9.4:refs/tags/v2026.9.4
+          test "$(git -C source rev-parse 'v2026.9.4^{commit}')" = 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          git -C source checkout --detach 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          test "$(git -C source remote get-url origin)" = https://github.com/openclaw/openclaw.git
+          test "$(git -C source rev-parse HEAD)" = 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          test -z "$(git -C source status --porcelain)"
+          { git -C source remote -v; git -C source rev-parse HEAD; git -C source rev-parse 'v2026.9.4^{commit}'; } > receipts/source.txt
+      - name: Setup compatible pinned Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+      - name: Setup repository-pinned pnpm
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node -e 'const p=require("./package.json"); if(p.version!=="2026.9.4" || !p.packageManager.startsWith("pnpm@12.3.4+sha512.")) process.exit(1); console.log(p.engines,p.packageManager)'
+          npm install --global pnpm@12.3.4
+          test "$(pnpm --version)" = 12.3.4
+          node --version
+          pnpm --version
+      - name: Apply exact candidate and verify complete source hashes
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 88a818f49858753eecb02a28623c4d8fb574a939
+          git -C source apply --check "$PWD/patches/owner-context.patch"
+          git -C source apply "$PWD/patches/owner-context.patch"
+          cp tests/run.router-owner.integration.test.ts source/src/agents/embedded-agent-runner/
+          cp tests/run-attempt.router-owner.test.ts source/extensions/codex/src/app-server/
+          python3 scripts/export-owner-provenance.py
+          python3 - <<'PYTHON'
+          import json
+          p=json.load(open('owner-receipts/complete-source-hashes.json'))
+          assert p['applied_diff_sha256']=='eb3c96bd85c1c5b682693ae5e3b6144d09b95c09b89bbaf481f3382d38399c6a'
+          PYTHON
+          printf 'candidate_commit=88a818f49858753eecb02a28623c4d8fb574a939\n' > owner-receipts/candidate.txt
+      - name: Frozen install
+        id: install
+        run: |
+          set +e
+          set -uo pipefail
+          cd source
+          pnpm install --frozen-lockfile 2>&1 | tee ../owner-receipts/frozen-install.log
+          code=${PIPESTATUS[0]}
+          printf '%s\n' "$code" > ../owner-receipts/install.exit
+          exit "$code"
+      - name: Verify source unchanged by installation
+        run: |
+          set -euo pipefail
+          cp owner-receipts/complete-source-hashes.json owner-receipts/pre-install-hashes.json
+          python3 scripts/export-owner-provenance.py
+          cmp owner-receipts/pre-install-hashes.json owner-receipts/complete-source-hashes.json
+      - name: Inspect canonical lint commands and resource-selected shards
+        working-directory: source
+        run: |
+          set -euo pipefail
+          git diff --exit-code HEAD -- package.json scripts/run-lint.mts scripts/run-oxlint-shards.mts scripts/run-oxlint.mts scripts/lib/local-check-runtime.mts
+          cp scripts/run-lint.mts scripts/run-oxlint-shards.mts scripts/run-oxlint.mts ../owner-receipts/
+          sha256sum package.json scripts/run-lint.mts scripts/run-oxlint-shards.mts scripts/run-oxlint.mts > ../owner-receipts/canonical.sha256
+          node --input-type=module -e 'import fs from "node:fs";const p=JSON.parse(fs.readFileSync("package.json"));if(p.scripts["lint:core"]!=="node --import ./scripts/tsx.mjs scripts/run-oxlint-shards.mts --only=core")throw Error("canonical command changed");console.log(p.scripts["lint:core"]);' | tee ../owner-receipts/canonical-command.txt
+          node --import ./scripts/tsx.mjs --input-type=module -e 'import {createOxlintShards} from "./scripts/run-oxlint-shards.mts";console.log(JSON.stringify(createOxlintShards(),null,2));' | tee ../owner-receipts/canonical-shards.json
+          node --version > ../owner-receipts/node-version.txt
+          pnpm --version > ../owner-receipts/pnpm-version.txt
+      - name: Diagnose only canonical oxlint core
+        id: diagnostic
+        working-directory: source
+        run: bash ../diagnostic-tools/scripts/diagnose-oxlint.sh
+      - name: Verify candidate unchanged after diagnostic
+        if: always() && steps.diagnostic.outcome != 'skipped'
+        run: |
+          cp owner-receipts/complete-source-hashes.json owner-receipts/pre-diagnostic-hashes.json
+          python3 scripts/export-owner-provenance.py
+          cmp owner-receipts/pre-diagnostic-hashes.json owner-receipts/complete-source-hashes.json
+      - name: Preserve partial receipts
+        if: always()
+        run: |
+          mkdir -p owner-receipts
+          cp -r receipts owner-receipts/initial-runner
+          { uname -a; free -h; df -h; } > owner-receipts/runner-final.txt
+          cd owner-receipts
+          find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS
+      - name: Upload diagnostic log and receipt even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owner-oxlint-core-${{ github.run_id }}-${{ github.run_attempt }}
+          path: owner-receipts/
+          if-no-files-found: error
+          retention-days: 30
