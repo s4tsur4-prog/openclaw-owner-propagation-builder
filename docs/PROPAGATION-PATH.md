@@ -16,6 +16,8 @@ Line references below describe unpatched upstream; CI binds original and patched
 
 See INHERITANCE-AUDIT.md. Undefined is UNKNOWN, never owner. System, heartbeat, cron/recovery, inter-session and child runs do not inherit owner authority. Existing command/tool permissions are unchanged.
 
-Native downstream Codex context currently constructs an explicit subset and omits this new optional projection. The exact sibling Codex source is not available to certify its native lifecycle. The common pre-model and reply-claim gates are covered separately. Before-agent-run parity is claimed only for the embedded/CLI paths actually tested.
+Native Codex upstream builds an explicit subset and lacks a before_agent_run invocation. The candidate forwards full run facts before normalized channel overrides, then checks the lifecycle gate before every turn/start RPC, including retries. Policy blocks retain hook:before_agent_run terminal provenance and safe public messages; they do not become provider availability failures. Model diagnostic start and llm_input occur only after admission, once per attempt.
 
-Router candidate uses current ctx.senderIsOwner only, and early before_agent_reply for supported triggers. A late STOP between the early gate and selection, undefined/unsupported trigger, or locked-model bypass still requires complete submission-gate proof before release readiness. Passing the candidate suites does not erase these gaps.
+The exact native dependency is @openai/codex 0.153.4. Official rust-v0.153.4 tag resolves to 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a. Its codex-rs/core/src/hook_runtime.rs UserPromptSubmit boundary was inspected; it is distinct from OpenClaw lifecycle hooks. No native Codex source patch is required or bundled.
+
+Router independently rechecks current-run selection and model identity at before_agent_run. Missing same-run decision, unknown effective model, or absent owner for genuine emergency blocks submission. Locked-selection bypasses cannot silently proceed. Native-owned/supervision paths without authoritative model identity are conservatively blocked. CI must prove these properties; source review is not a runtime PASS.

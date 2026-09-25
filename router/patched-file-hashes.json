@@ -1,7 +1,7 @@
 {
-  "README.md": "ec5100d5d6d762d3041221a70b06f30256f794bc817c163d7b54c30cce925e81",
+  "README.md": "7ba91fc0362b39b7b67710874501421dfbc89ca92a5368cabe73c803cbc410f5",
   "decision.js": "17de09bf526a27582ae0480739481aed663ebd67a59679a93f74d7e12a79a499",
-  "index.js": "c024306d0b7f422c7eac435963d4486ec865545a45d029dc26027142d1b76335",
+  "index.js": "c242a5aeb2da55c2bde92c059a02f2cc1ee4d6be03ca0a0f93c48c849d2cbfae",
   "openclaw.plugin.json": "199e07cf8ddb08a175dd210d7e265b133b9d7447d15cb0ab13bb1f0fa8429386",
   "original-file-hashes.json": "6e4d0a561a5ce266ac237bf08b79e54b1563d544735a1a0039db8409468cad15",
   "owner.js": "b019d3a012c8de85ed227df7bcef33b7dcdd08d98c7eddc82b7b4b4508bee32a",
@@ -11,6 +11,6 @@
   "test/failure-classification.test.js": "dda87e367f5f2f30159741dfdc567fb1ce6272d29a3f4ecea8f27fbb444a3779",
   "test/owner-decision.test.js": "202260fa7476d0fcf1c5f025c0df9cc2fea6c597f7e160f8e72252a2abdea8cc",
   "test/pilot.test.js": "5160069ff28df7ba1c31f1a9d4a9c309c814dfde66efecbe92cab83f1602df23",
-  "test/plugin-lifecycle.test.js": "7454f171e21a7fa89b044101e99bebbc6579370bb86efbac4f36f118cb33622c",
+  "test/plugin-lifecycle.test.js": "d2a6f8c7e891d07b70b66d66c7cdcb5a60ec6677a08b07f7e5c2b661dc357ed1",
   "test/router.test.js": "4c01aea1d6097cffae93755ad4088ccddad5662cf0f8fba4fb7323446c2d5470"
 }

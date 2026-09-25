@@ -12,7 +12,7 @@ concurrency:
 jobs:
   owner-patch:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     steps:
       - name: Checkout builder
         uses: actions/checkout@v4
@@ -57,8 +57,46 @@ jobs:
           test "$(pnpm --version)" = 12.3.4
           node --version
           pnpm --version
-      - name: Verify patch and all selected regression lanes
-        run: python3 scripts/verify-owner-patch.py
+      - name: Prepare exact clean baseline and apply verified patch
+        id: prepare
+        run: python3 scripts/verify-owner-patch.py prepare
+      - name: Router syntax and standalone suite
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        run: python3 scripts/verify-owner-patch.py router
+      - name: Targeted core owner hooks and SDK
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        run: python3 scripts/verify-owner-patch.py targeted
+      - name: Native submission gates and Router bridge
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        run: python3 scripts/verify-owner-patch.py native
+      - name: Patched source build
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        run: python3 scripts/verify-owner-patch.py build
+      - name: Patched source check
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        run: python3 scripts/verify-owner-patch.py check
+      - name: Core test types
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        run: python3 scripts/verify-owner-patch.py core-types
+      - name: Extension test types
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        run: python3 scripts/verify-owner-patch.py extension-types
+      - name: Affected ingress and Telegram
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        run: python3 scripts/verify-owner-patch.py ingress
+      - name: Wider lifecycle regression
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        run: python3 scripts/verify-owner-patch.py wider
+      - name: Plugin and channel contracts
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        run: python3 scripts/verify-owner-patch.py contracts
+      - name: Summarize all required stages and source integrity
+        id: summary
+        if: always()
+        run: python3 scripts/verify-owner-patch.py summary
+      - name: Package verified source with native Codex adapter
+        if: ${{ !cancelled() && steps.summary.outcome == 'success' }}
+        run: python3 scripts/verify-owner-patch.py package
       - name: Capture safe candidate provenance and hashes
         if: always()
         shell: bash

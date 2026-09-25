@@ -38,6 +38,8 @@ const ctx = {
   channel: "telegram",
   accountId: "default",
   senderIsOwner: true,
+  modelProviderId: "openai",
+  modelId: "gpt-6-astra",
   senderId: "1000000001"
 };
 const readOnlyPrompt = "Review a proposed change to a production database schema and migration recovery plan; this is read-only analysis and must not execute any mutation.";
@@ -148,3 +150,61 @@ for (const senderIsOwner of [false, undefined]) {
     assert.equal(late.reason, "owner_authority_required");
   });
 }
+
+test("submission gate rejects locked model without same-run selection", async () => {
+  const { hooks, statePath } = await harness();
+  const result = await hooks.get("before_agent_run")({ prompt: "Hello" }, { ...ctx, runId: "locked" });
+  assert.equal(result.reason, "routing_selection_missing");
+  assert.equal(readStopState(statePath).stopped, false);
+});
+
+test("submission gate does not reuse prior same-session selection", async () => {
+  const { hooks } = await harness();
+  await hooks.get("before_model_resolve")({ prompt: highPrompt }, { ...ctx, runId: "prior-owner" });
+  const result = await hooks.get("before_agent_run")({ prompt: "Hello" }, { ...ctx, runId: "next-owner" });
+  assert.equal(result.reason, "routing_selection_missing");
+});
+
+test("late owner false cannot reuse an owner selection or event true", async () => {
+  const { hooks, statePath } = await harness();
+  const context = { ...ctx, runId: "late-authority" };
+  await hooks.get("before_model_resolve")({ prompt: highPrompt }, context);
+  writeStopState(statePath, "high_risk_senior_model_unavailable");
+  const result = await hooks.get("before_agent_run")({ prompt: highPrompt, senderIsOwner: true }, { ...context, senderIsOwner: false });
+  assert.equal(result.reason, "router_stopped_emergency_high_risk");
+});
+
+for (const senderIsOwner of [false, undefined]) {
+  test(`submission gate independently rejects emergency authority ${senderIsOwner}`, async () => {
+    const { hooks } = await harness();
+    const result = await hooks.get("before_agent_run")({ prompt: highPrompt, senderIsOwner: true }, { ...ctx, runId: "untrusted-gate", senderIsOwner });
+    assert.equal(result.reason, "owner_authority_required");
+  });
+}
+
+for (const route of [{ modelProviderId: undefined }, { modelId: undefined }]) {
+  test(`submission unknown route blocks without false unavailability ${JSON.stringify(route)}`, async () => {
+    const { hooks, statePath } = await harness();
+    const context = { ...ctx, runId: "unknown-route" };
+    await hooks.get("before_model_resolve")({ prompt: highPrompt }, context);
+    const result = await hooks.get("before_agent_run")({ prompt: highPrompt }, { ...context, ...route });
+    assert.equal(result.reason, "routing_effective_model_unknown");
+    assert.equal(readStopState(statePath).stopped, false);
+  });
+}
+
+test("submission mismatch blocks and records silent fallback, not unavailability", async () => {
+  const { hooks, statePath } = await harness();
+  const context = { ...ctx, runId: "pre-submit-fallback" };
+  await hooks.get("before_model_resolve")({ prompt: highPrompt }, context);
+  const result = await hooks.get("before_agent_run")({ prompt: highPrompt }, { ...context, modelId: "gpt-5.6-sol" });
+  assert.equal(result.reason, "silent_fallback");
+  assert.equal(readStopState(statePath).trigger, "silent_fallback");
+});
+
+test("submission current-owner matching selection passes", async () => {
+  const { hooks } = await harness();
+  const context = { ...ctx, runId: "matched-gate" };
+  await hooks.get("before_model_resolve")({ prompt: highPrompt }, context);
+  assert.equal(await hooks.get("before_agent_run")({ prompt: highPrompt }, context), undefined);
+});

@@ -1,8 +1,8 @@
 diff --git a/docs/plugins/architecture.md b/docs/plugins/architecture.md
-index 82f43e67..0ac45ff4 100644
+index 82f43e67..463f1989 100644
 --- a/docs/plugins/architecture.md
 +++ b/docs/plugins/architecture.md
-@@ -29,6 +29,29 @@ This is the **deep architecture reference** for the OpenClaw plugin system. For
+@@ -29,6 +29,30 @@ This is the **deep architecture reference** for the OpenClaw plugin system. For
    </Card>
  </CardGroup>
  
@@ -23,15 +23,576 @@ index 82f43e67..0ac45ff4 100644
 +is unchanged; this field does not mean that a channel sender was authenticated.
 +
 +Hook producers that do not project this optional field remain unknown. The
-+native harness's downstream hooks may omit it; the common model-resolution and
-+reply-claim gates run before harness submission. Plugins must use a supported
-+pre-submission gate to block work: throwing from `before_model_resolve` is not a
-+blocking contract. This projection does not change tool authorization or grant
++Codex app-server adapter projects the same current-run authority and checks
++`before_agent_run` before each native turn submission, including retries.
++A block is a policy terminal, not a provider availability failure. Plugins must
++use a supported pre-submission gate to block work: throwing from
++`before_model_resolve` is not a blocking contract. This projection does not change tool authorization or grant
 +new inherited execution capabilities.
 +
  ## Public capability model
  
  Capabilities are the public **native plugin** model inside OpenClaw. Native plugins can register one or more capability types:
+diff --git a/extensions/codex/src/app-server/before-agent-run.ts b/extensions/codex/src/app-server/before-agent-run.ts
+new file mode 100644
+index 00000000..535061a4
+--- /dev/null
++++ b/extensions/codex/src/app-server/before-agent-run.ts
+@@ -0,0 +1,57 @@
++import { resolveBlockMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
++import type { CodexAttemptContext } from "./run-attempt-context.js";
++
++/** A policy terminal, never a provider/model availability failure. */
++export class CodexBeforeAgentRunBlockedError extends Error {
++  constructor(
++    readonly blockedBy: string,
++    message: string,
++  ) {
++    super(message);
++    this.name = "CodexBeforeAgentRunBlockedError";
++  }
++}
++
++/** Recheck the current host policy at every native submission, including retries. */
++export async function assertCodexBeforeAgentRunAllowed(
++  context: CodexAttemptContext,
++  input: { prompt: string; systemPrompt?: string; historyMessages: unknown[] },
++  submittedModel: { modelProviderId?: string; modelId?: string },
++): Promise<void> {
++  const { hookRunner } = context;
++  // The startup binding may differ from the requested model. Policy must see
++  // the exact submission tuple, without changing other lifecycle snapshots.
++  const hookContext = { ...context.hookContext, ...submittedModel };
++  if (!hookRunner?.hasHooks("before_agent_run")) {
++    return;
++  }
++  let result: Awaited<ReturnType<typeof hookRunner.runBeforeAgentRun>>;
++  try {
++    result = await hookRunner.runBeforeAgentRun(
++      {
++        prompt: input.prompt,
++        systemPrompt: input.systemPrompt,
++        messages: structuredClone(input.historyMessages),
++        channelId: hookContext.channelId,
++        accountId: hookContext.accountId,
++        senderId: hookContext.senderId,
++        senderIsOwner: hookContext.senderIsOwner,
++      },
++      hookContext,
++    );
++  } catch {
++    throw new CodexBeforeAgentRunBlockedError(
++      "before_agent_run",
++      resolveBlockMessage(
++        { outcome: "block", reason: "before_agent_run hook failed" },
++        { blockedBy: "before_agent_run" },
++      ),
++    );
++  }
++  if (result?.decision.outcome === "block") {
++    throw new CodexBeforeAgentRunBlockedError(
++      result.pluginId,
++      resolveBlockMessage(result.decision, { blockedBy: result.pluginId }),
++    );
++  }
++}
+diff --git a/extensions/codex/src/app-server/run-attempt-context.ts b/extensions/codex/src/app-server/run-attempt-context.ts
+index a1629bb1..d4b5fa56 100644
+--- a/extensions/codex/src/app-server/run-attempt-context.ts
++++ b/extensions/codex/src/app-server/run-attempt-context.ts
+@@ -116,6 +116,7 @@ export async function prepareCodexAttemptContext(
+     trigger: params.trigger,
+     inputProvenance: params.inputProvenance,
+     ...buildAgentHookContextChannelFields({
++      ...params,
+       sessionKey: contextSessionKey,
+       messageChannel: params.messageChannel,
+       messageProvider: params.messageProvider,
+diff --git a/extensions/codex/src/app-server/run-attempt-turn-request.ts b/extensions/codex/src/app-server/run-attempt-turn-request.ts
+index c97bdd0d..cdf50a9d 100644
+--- a/extensions/codex/src/app-server/run-attempt-turn-request.ts
++++ b/extensions/codex/src/app-server/run-attempt-turn-request.ts
+@@ -1,4 +1,8 @@
+-import { embeddedAgentLog, formatErrorMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
++import {
++  embeddedAgentLog,
++  formatErrorMessage,
++  runAgentHarnessLlmInputHook,
++} from "openclaw/plugin-sdk/agent-harness-runtime";
+ import {
+   interruptCodexTurnAndWaitBestEffort,
+   retireUnsafeCodexTurnClientBestEffort,
+@@ -7,6 +11,10 @@ import {
+   createCodexModelCallDiagnosticEmitter,
+   utf8JsonByteLength,
+ } from "./attempt-diagnostics.js";
++import {
++  assertCodexBeforeAgentRunAllowed,
++  CodexBeforeAgentRunBlockedError,
++} from "./before-agent-run.js";
+ import { assertCodexSessionRuntimeOwnership } from "./binding-connection.js";
+ import { prepareCodexWorkspaceReferences } from "./client-runtime.js";
+ import { isCodexAppServerIndeterminateRequestCancellationError } from "./client.js";
+@@ -113,6 +121,7 @@ export async function prepareCodexAttemptTurnRequest(
+     prompt.refreshWorkspaceReferences(references.include);
+     return references;
+   };
++  let modelCallStarted = false;
+   const startCodexTurn = async (): Promise<CodexTurnStartResponse> => {
+     const activeTurnRoute = (await ensureCurrentThreadRoute()) as {
+       armTurn(): void;
+@@ -136,6 +145,8 @@ export async function prepareCodexAttemptTurnRequest(
+     const inferenceRoute = usesSupervisionConnection
+       ? undefined
+       : getCodexInferenceThread(resourceState.client, resourceState.thread.threadId);
++    const submissionThread = resourceState.thread;
++    const submissionProvider = submissionThread.modelProvider;
+     const turnStartParams = buildTurnStartParams(
+       {
+         ...runtimeParams,
+@@ -218,6 +229,37 @@ export async function prepareCodexAttemptTurnRequest(
+             : file,
+         );
+     }
++    params.hostCapabilities.assertActive();
++    connection.assertCurrent();
++    const nativeOwnsModel =
++      usesSupervisionConnection || submissionThread.preserveNativeModel === true;
++    await assertCodexBeforeAgentRunAllowed(context, buildLlmInputEvent(), {
++      modelProviderId: nativeOwnsModel ? undefined : submissionProvider,
++      modelId: nativeOwnsModel
++        ? undefined
++        : (turnStartParams.collaborationMode?.settings.model ?? turnStartParams.model),
++    });
++    runAbortController.signal.throwIfAborted();
++    params.hostCapabilities.assertActive();
++    connection.assertCurrent();
++    if (
++      resourceState.thread !== submissionThread ||
++      resourceState.thread.modelProvider !== submissionProvider
++    ) {
++      throw new CodexBeforeAgentRunBlockedError(
++        "before_agent_run",
++        "Your message could not be sent: native model binding changed before submission",
++      );
++    }
++    if (!modelCallStarted) {
++      modelCallStarted = true;
++      codexModelCallDiagnostics.emitStarted();
++      runAgentHarnessLlmInputHook({
++        event: buildLlmInputEvent(),
++        ctx: context.hookContext,
++        hookRunner: context.hookRunner,
++      });
++    }
+     codexModelCallDiagnostics.setRequestPayloadBytes(utf8JsonByteLength(turnStartParams));
+     recordCodexTrajectoryContext(resources.trajectoryRecorder, {
+       attempt: params,
+diff --git a/extensions/codex/src/app-server/run-attempt-turn-start.ts b/extensions/codex/src/app-server/run-attempt-turn-start.ts
+index e7b1dad2..231bb25f 100644
+--- a/extensions/codex/src/app-server/run-attempt-turn-start.ts
++++ b/extensions/codex/src/app-server/run-attempt-turn-start.ts
+@@ -1,8 +1,6 @@
+ import {
+   embeddedAgentLog,
+   formatErrorMessage,
+-  runAgentCleanupStep,
+-  runAgentHarnessLlmInputHook,
+   runAgentHarnessLlmOutputHook,
+ } from "openclaw/plugin-sdk/agent-harness-runtime";
+ import { isIncognitoSessionKey } from "../incognito-session.js";
+@@ -17,7 +15,8 @@ import {
+   isInvalidCodexImagePayloadError,
+ } from "./attempt-results.js";
+ import { isCodexContextRestartSelectionChangedError } from "./attempt-startup.js";
+-import type { EmbeddedRunAttemptResult } from "./attempt-terminal.js";
++import { attemptTerminal, type EmbeddedRunAttemptResult } from "./attempt-terminal.js";
++import { CodexBeforeAgentRunBlockedError } from "./before-agent-run.js";
+ import type { CodexTurnStartResponse } from "./protocol.js";
+ import { emitCodexAppServerEvent, runCodexAgentEndHook } from "./run-attempt-lifecycle.js";
+ import type { CodexAttemptNotificationController } from "./run-attempt-notification-controller.js";
+@@ -70,13 +69,70 @@ export async function startCodexAttemptTurn(
+   } = connection;
+   const { state, turnIdRef } = turnRuntime;
+   const { waitForActiveNativeTurnCompletion } = notifications;
+-  const { codexModelCallDiagnostics, startCodexTurn, buildLlmInputEvent } = requestRuntime;
++  const { codexModelCallDiagnostics, startCodexTurn } = requestRuntime;
++  const cleanupUnstartedTurn = async () => {
++    await resources.runCleanupStep("codex-unstarted-thread-unsubscribe", async () => {
++      const bindingReleased = isIncognitoSessionKey(params.sessionKey)
++        ? await bindingStore.mutate(bindingIdentity, {
++            kind: "clear",
++            threadId: resourceState.thread.threadId,
++          })
++        : true;
++      if (bindingReleased && !resourceState.startupClientUnsafe) {
++        const released = await unsubscribeCodexThreadBestEffort(resourceState.client, {
++          threadId: resourceState.thread.threadId,
++          timeoutMs: CODEX_APP_SERVER_UNSUBSCRIBE_TIMEOUT_MS,
++        });
++        if (!released) {
++          // Retire this unsafe client without disturbing sibling leases.
++          await closeCodexStartupClientBestEffort(resourceState.client);
++        }
++      }
++    });
++    releaseCurrentRoute();
++    activateNativePreToolUseFailureFallback();
++    resourceState.nativeHookRelay?.unregister();
++    await resources.runCleanupStep("codex-unstarted-sandbox", releaseSandboxExecEnvironment);
++    await resources.runCleanupStep("codex-trajectory-flush-startup-failure", async () => {
++      await trajectoryRecorder?.flush();
++    });
++    await releaseSharedClientLeaseAndRetireOneShotClient();
++  };
++  const finishHookBlock = async (error: CodexBeforeAgentRunBlockedError) => {
++    // An initial block has no started call; a block on retry closes the existing
++    // observation as a policy interruption, never a model availability failure.
++    codexModelCallDiagnostics.emitError(error, { failureKind: "aborted" });
++    trajectoryRecorder?.recordEvent("session.ended", {
++      status: "blocked",
++      threadId: resourceState.thread.threadId,
++      blockedBy: error.blockedBy,
++    });
++    markTrajectoryEndRecorded();
++    // Cleanup failure must not replace a policy terminal with a retryable
++    // provider error. The cleanup owner records any failure for diagnosis.
++    await resources.runCleanupStep("codex-hook-block-cleanup", cleanupUnstartedTurn);
++    return {
++      result: {
++        ...buildCodexTurnStartFailureResult({
++          params,
++          message: error.message,
++          messagesSnapshot: historyState.messages,
++          systemPromptReport,
++        }),
++        terminal: attemptTerminal.normalize({
++          promptError: error,
++          promptErrorSource: "hook:before_agent_run",
++        }),
++      },
++    };
++  };
+   let turn: CodexTurnStartResponse | undefined;
+   try {
+-    codexModelCallDiagnostics.emitStarted();
+-    runAgentHarnessLlmInputHook({ event: buildLlmInputEvent(), ctx: hookContext, hookRunner });
+     turn = await startCodexTurn();
+   } catch (error) {
++    if (error instanceof CodexBeforeAgentRunBlockedError) {
++      return await finishHookBlock(error);
++    }
+     let turnStartError = error;
+     if (isCodexActiveCompactTurnError(turnStartError)) {
+       embeddedAgentLog.info(
+@@ -99,6 +155,9 @@ export async function startCodexAttemptTurn(
+         }
+       }
+     }
++    if (turnStartError instanceof CodexBeforeAgentRunBlockedError) {
++      return await finishHookBlock(turnStartError);
++    }
+     if (
+       turn === undefined &&
+       resourceState.thread.connectionScope !== "supervision" &&
+@@ -165,6 +224,9 @@ export async function startCodexAttemptTurn(
+         turnStartError = retrySetupError;
+       }
+     }
++    if (turnStartError instanceof CodexBeforeAgentRunBlockedError) {
++      return await finishHookBlock(turnStartError);
++    }
+     if (turn === undefined) {
+       const usageLimitError = await formatCodexTurnStartUsageLimitError({
+         client: resourceState.client,
+@@ -241,40 +303,7 @@ export async function startCodexAttemptTurn(
+         ctx: hookContext,
+         hookRunner,
+       });
+-      const bindingReleased = isIncognitoSessionKey(params.sessionKey)
+-        ? await bindingStore.mutate(bindingIdentity, {
+-            kind: "clear",
+-            threadId: resourceState.thread.threadId,
+-          })
+-        : true;
+-      if (bindingReleased && !resourceState.startupClientUnsafe) {
+-        const released = await unsubscribeCodexThreadBestEffort(resourceState.client, {
+-          threadId: resourceState.thread.threadId,
+-          timeoutMs: CODEX_APP_SERVER_UNSUBSCRIBE_TIMEOUT_MS,
+-        });
+-        if (!released) {
+-          // Detach the unsafe client before releasing this lease, but let sibling leases finish.
+-          await runAgentCleanupStep({
+-            runId: params.runId,
+-            sessionId: params.sessionId,
+-            step: "codex-retire-unsafe-startup-client",
+-            log: embeddedAgentLog,
+-            cleanup: async () => closeCodexStartupClientBestEffort(resourceState.client),
+-          });
+-        }
+-      }
+-      releaseCurrentRoute();
+-      activateNativePreToolUseFailureFallback();
+-      resourceState.nativeHookRelay?.unregister();
+-      await releaseSandboxExecEnvironment();
+-      await runAgentCleanupStep({
+-        runId: params.runId,
+-        sessionId: params.sessionId,
+-        step: "codex-trajectory-flush-startup-failure",
+-        log: embeddedAgentLog,
+-        cleanup: async () => trajectoryRecorder?.flush(),
+-      });
+-      await releaseSharedClientLeaseAndRetireOneShotClient();
++      await cleanupUnstartedTurn();
+       if (usageLimitError) {
+         await markCodexAuthProfileBlockedFromRateLimits({
+           params,
+diff --git a/extensions/codex/src/app-server/run-attempt.auth-context.test.ts b/extensions/codex/src/app-server/run-attempt.auth-context.test.ts
+index 9a90dc09..fb2c464f 100644
+--- a/extensions/codex/src/app-server/run-attempt.auth-context.test.ts
++++ b/extensions/codex/src/app-server/run-attempt.auth-context.test.ts
+@@ -1,8 +1,13 @@
+ import path from "node:path";
++import {
++  onInternalDiagnosticEvent,
++  waitForDiagnosticEventsDrained,
++} from "openclaw/plugin-sdk/diagnostic-runtime";
+ import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
+ import { initializeGlobalHookRunner } from "openclaw/plugin-sdk/hook-runtime";
+ import { createMockPluginRegistry } from "openclaw/plugin-sdk/plugin-test-runtime";
+ import { beforeEach, describe, expect, it, vi } from "vitest";
++import { CodexAppServerRpcError } from "./client.js";
+ import { itemNotification } from "./protocol.test-helpers.js";
+ import {
+   createParams,
+@@ -32,6 +37,227 @@ describe("runCodexAppServerAttempt authenticated hook context", () => {
+     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+   });
+ 
++  it.each([true, false, undefined])(
++    "projects owner=%s consistently before native submission",
++    async (senderIsOwner) => {
++      const beforeAgentRun = vi.fn(() => undefined);
++      initializeGlobalHookRunner(
++        createMockPluginRegistry([{ hookName: "before_agent_run", handler: beforeAgentRun }]),
++      );
++      const params = createParams(
++        path.join(tempDir, "owner-context.jsonl"),
++        path.join(tempDir, "owner-context-workspace"),
++      );
++      params.trigger = "user";
++      params.senderIsOwner = senderIsOwner;
++      params.senderId = "fixture-owner";
++      params.agentAccountId = "fixture-account";
++      const harness = createHookHarness();
++      const run = runCodexAppServerAttempt(params);
++      await harness.turnStarted;
++      expect(beforeAgentRun).toHaveBeenCalledOnce();
++      const [event, context] = mockCall(beforeAgentRun, "before_agent_run") as [
++        { senderIsOwner?: boolean },
++        { senderIsOwner?: boolean },
++      ];
++      expect(event.senderIsOwner).toBe(senderIsOwner);
++      expect(context.senderIsOwner).toBe(senderIsOwner);
++      await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
++      expect((await run).terminal).toEqual({ kind: "ok" });
++    },
++  );
++
++  it.each(["block", "throw"] as const)(
++    "fails closed on hook %s without submitting or emitting model failure",
++    async (behavior) => {
++      const beforeAgentRun = vi.fn(() => {
++        if (behavior === "throw") {
++          throw new Error("private-hook-detail");
++        }
++        return { outcome: "block" as const, reason: "private-hook-detail", message: "Stopped" };
++      });
++      const llmInput = vi.fn();
++      const llmOutput = vi.fn();
++      initializeGlobalHookRunner(
++        createMockPluginRegistry([
++          { hookName: "before_agent_run", handler: beforeAgentRun },
++          { hookName: "llm_input", handler: llmInput },
++          { hookName: "llm_output", handler: llmOutput },
++        ]),
++      );
++      const diagnosticTypes: string[] = [];
++      const stopDiagnostics = onInternalDiagnosticEvent((event) => {
++        diagnosticTypes.push(event.type);
++      });
++      try {
++        const params = createParams(
++          path.join(tempDir, "owner-block.jsonl"),
++          path.join(tempDir, "owner-block-workspace"),
++        );
++        params.senderIsOwner = true;
++        const harness = createStartedThreadHarness();
++        const result = await runCodexAppServerAttempt(params);
++        expect(result.terminal).toMatchObject({ kind: "failed", source: "hook:before_agent_run" });
++        expect(String("error" in result.terminal ? result.terminal.error : "")).not.toContain(
++          "private-hook-detail",
++        );
++        expect(harness.requests.some((request) => request.method === "turn/start")).toBe(false);
++        expect(harness.requests.some((request) => request.method === "thread/unsubscribe")).toBe(
++          true,
++        );
++        expect(llmInput).not.toHaveBeenCalled();
++        expect(llmOutput).not.toHaveBeenCalled();
++        await waitForDiagnosticEventsDrained();
++        expect(diagnosticTypes.filter((type) => type.startsWith("model.call."))).toEqual([]);
++      } finally {
++        stopDiagnostics();
++      }
++    },
++  );
++
++  it("preserves the hook terminal when client cleanup fails", async () => {
++    initializeGlobalHookRunner(
++      createMockPluginRegistry([
++        {
++          hookName: "before_agent_run",
++          handler: () => ({ outcome: "block" as const, reason: "policy" }),
++        },
++      ]),
++    );
++    const params = createParams(
++      path.join(tempDir, "cleanup-owner.jsonl"),
++      path.join(tempDir, "cleanup-owner-workspace"),
++    );
++    params.oneShotCliRun = true;
++    params.cleanupBundleMcpOnRunEnd = true;
++    const harness = createStartedThreadHarness();
++    const close = vi
++      .spyOn(harness.client, "closeAndWait")
++      .mockRejectedValue(new Error("cleanup failed"));
++    const result = await runCodexAppServerAttempt(params);
++    expect(result.terminal).toMatchObject({ kind: "failed", source: "hook:before_agent_run" });
++    expect(harness.requests.some((request) => request.method === "turn/start")).toBe(false);
++    expect(close).toHaveBeenCalled();
++  });
++
++  it.each([false, true])(
++    "rechecks policy on compact retry with block=%s and one diagnostic start",
++    async (blockRetry) => {
++      let checks = 0;
++      const beforeAgentRun = vi.fn(() => {
++        checks += 1;
++        return blockRetry && checks > 1
++          ? { outcome: "block" as const, reason: "late stop" }
++          : undefined;
++      });
++      const llmInput = vi.fn();
++      initializeGlobalHookRunner(
++        createMockPluginRegistry([
++          { hookName: "before_agent_run", handler: beforeAgentRun },
++          { hookName: "llm_input", handler: llmInput },
++        ]),
++      );
++      const diagnostics: Array<{ type: string; failureKind?: unknown }> = [];
++      const stopDiagnostics = onInternalDiagnosticEvent((event) => {
++        diagnostics.push(event);
++      });
++      try {
++        const params = createParams(
++          path.join(tempDir, "retry-owner.jsonl"),
++          path.join(tempDir, "retry-owner-workspace"),
++        );
++        const submitted = createDeferred<void>();
++        let starts = 0;
++        const harness = createStartedThreadHarness(async (method) => {
++          if (method === "turn/start") {
++            starts += 1;
++            if (starts === 1) {
++              await harness.notify({
++                method: "turn/started",
++                params: {
++                  threadId: "thread-1",
++                  turn: { id: "compact-turn", status: "inProgress" },
++                },
++              });
++              queueMicrotask(() => {
++                void harness.completeTurn({ threadId: "thread-1", turnId: "compact-turn" });
++              });
++              throw new CodexAppServerRpcError(
++                {
++                  message: "cannot steer a compact turn",
++                  data: {
++                    message: "cannot steer a compact turn",
++                    codexErrorInfo: { activeTurnNotSteerable: { turnKind: "compact" } },
++                    additionalDetails: null,
++                  },
++                },
++                "turn/start",
++              );
++            }
++            submitted.resolve();
++          }
++        });
++        const run = runCodexAppServerAttempt(params);
++        if (!blockRetry) {
++          await submitted.promise;
++          await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
++        }
++        const result = await run;
++        expect(beforeAgentRun).toHaveBeenCalledTimes(2);
++        expect(llmInput).toHaveBeenCalledOnce();
++        expect(starts).toBe(blockRetry ? 1 : 2);
++        expect(result.terminal).toMatchObject(
++          blockRetry ? { kind: "failed", source: "hook:before_agent_run" } : { kind: "ok" },
++        );
++        await waitForDiagnosticEventsDrained();
++        expect(diagnostics.filter((event) => event.type === "model.call.started")).toHaveLength(1);
++        if (blockRetry) {
++          expect(diagnostics.filter((event) => event.type === "model.call.error")).toMatchObject([
++            { failureKind: "aborted" },
++          ]);
++        }
++      } finally {
++        stopDiagnostics();
++      }
++    },
++  );
++
++  it.each(["cron", "heartbeat", "subagent", "recovery"] as const)(
++    "withholds stale owner in native %s runs",
++    async (kind) => {
++      const beforeAgentRun = vi.fn(() => ({ outcome: "block" as const, reason: "stop" }));
++      initializeGlobalHookRunner(
++        createMockPluginRegistry([{ hookName: "before_agent_run", handler: beforeAgentRun }]),
++      );
++      const params = createParams(
++        path.join(tempDir, "internal-owner.jsonl"),
++        path.join(tempDir, "internal-owner-workspace"),
++      );
++      params.senderIsOwner = true;
++      params.trigger = "user";
++      if (kind === "cron" || kind === "heartbeat") {
++        params.bootstrapContextRunKind = kind;
++      } else if (kind === "subagent") {
++        params.spawnedBy = "fixture-parent";
++      } else {
++        params.inputProvenance = {
++          kind: "internal_system",
++          sourceTool: "main_session_restart_recovery",
++        };
++      }
++      const harness = createStartedThreadHarness();
++      const result = await runCodexAppServerAttempt(params);
++      expect(result.terminal).toMatchObject({ source: "hook:before_agent_run" });
++      const [event, context] = mockCall(beforeAgentRun, "before_agent_run") as [
++        { senderIsOwner?: boolean },
++        { senderIsOwner?: boolean },
++      ];
++      expect(event.senderIsOwner).toBeUndefined();
++      expect(context.senderIsOwner).toBeUndefined();
++      expect(harness.requests.some((request) => request.method === "turn/start")).toBe(false);
++    },
++  );
++
+   it("preserves authenticated channel context across prompt and compaction hooks", async () => {
+     const beforePromptBuild = vi.fn(() => undefined);
+     const beforeCompaction = vi.fn(() => undefined);
 diff --git a/src/agents/cli-runner.ts b/src/agents/cli-runner.ts
 index 94dc1ba6..be432944 100644
 --- a/src/agents/cli-runner.ts
@@ -438,6 +999,48 @@ index 3e41be0c..b87f0c74 100644
  describe("agent harness lifecycle hook helpers", () => {
    afterEach(() => {
      Reflect.deleteProperty(globalThis, Symbol.for("openclaw.pluginFinalizeRetryBudget"));
+diff --git a/src/plugin-sdk/agent-harness-runtime.test.ts b/src/plugin-sdk/agent-harness-runtime.test.ts
+index 01e5a135..733b891a 100644
+--- a/src/plugin-sdk/agent-harness-runtime.test.ts
++++ b/src/plugin-sdk/agent-harness-runtime.test.ts
+@@ -12,6 +12,7 @@ import {
+   formatAgentHarnessUserInputPrompt,
+   getModelProviderRequestTransport,
+   queueAgentHarnessMessage,
++  resolveBlockMessage,
+   setActiveEmbeddedRun,
+   type AgentHarness,
+   type AgentHarnessQuestionGatewayCall,
+@@ -30,6 +31,17 @@ import type {
+   ProviderRouteOverridePresence,
+ } from "./provider-model-types.js";
+ 
++describe("harness input-gate block envelope", () => {
++  it("keeps private policy reasons out of the public response", () => {
++    expect(
++      resolveBlockMessage(
++        { outcome: "block", reason: "private-policy-detail" },
++        { blockedBy: "owner-policy" },
++      ),
++    ).toBe("Your message could not be sent: blocked by owner-policy");
++  });
++});
++
+ describe("classifyAgentHarnessTerminalOutcome", () => {
+   it("does not classify an in-flight turn", () => {
+     expect(
+diff --git a/src/plugin-sdk/agent-harness-runtime.ts b/src/plugin-sdk/agent-harness-runtime.ts
+index e051436d..4c95dbf3 100644
+--- a/src/plugin-sdk/agent-harness-runtime.ts
++++ b/src/plugin-sdk/agent-harness-runtime.ts
+@@ -580,6 +580,7 @@ export {
+   runAgentHarnessLlmInputHook,
+   runAgentHarnessLlmOutputHook,
+ } from "../agents/harness/lifecycle-hook-helpers.js";
++export { resolveBlockMessage } from "../plugins/hook-decision-types.js";
+ export {
+   buildNativeHookRelayCommand,
+   hasNativeHookRelayInvocation,
 diff --git a/src/plugins/hook-agent-context.test.ts b/src/plugins/hook-agent-context.test.ts
 index 5eec8d57..66ae69c5 100644
 --- a/src/plugins/hook-agent-context.test.ts

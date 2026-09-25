@@ -261,9 +261,34 @@ export default definePluginEntry({
 
     api.on("before_agent_run", (event, ctx) => {
       if (!inScope(ctx)) return;
-      recordTrustedOwner(ownerStorePath, ctx, event);
+      // This submission gate must stand alone: locked selection may bypass routing,
+      // and authority/state may change after the earlier reply/selection hooks.
+      if (isEmergencyHighRisk(event.prompt) && !isVerifiedOwner(ctx, event)) {
+        let reason = "owner_authority_required";
+        try {
+          if (readStopState(statePath).stopped) reason = "router_stopped_emergency_high_risk";
+        } catch {
+          reason = "router_failure_emergency_high_risk";
+        }
+        return { outcome: "block", reason };
+      }
       const blocked = takeBlocked(ctx, event);
       if (blocked) return { outcome: "block", reason: blocked.reason };
+      // Never use the session fallback here: only this exact run's selection counts.
+      const decision = ctx?.runId ? decisions.get(ctx.runId) : undefined;
+      if (!decision) return { outcome: "block", reason: "routing_selection_missing" };
+      if (!ctx.modelProviderId || !ctx.modelId) {
+        return { outcome: "block", reason: "routing_effective_model_unknown" };
+      }
+      const effectiveModel = `${ctx.modelProviderId}/${ctx.modelId}`;
+      if (effectiveModel !== decision.selected_model) {
+        decision.effective_model = effectiveModel;
+        decision.fallback = true;
+        decision.result = "FAIL";
+        writeStopState(statePath, "silent_fallback", { task_session_id: decision.task_session_id });
+        return { outcome: "block", reason: "silent_fallback" };
+      }
+      recordTrustedOwner(ownerStorePath, ctx, event);
     }, { priority: 1000, registrationId: "model-router-v1-owner-identity", timeoutMs: 1000 });
   }
 });

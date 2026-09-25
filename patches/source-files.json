@@ -1,11 +1,36 @@
 {
   "base_commit": "3a9d69db306cd7f081e06254cb89c4bcc14a7107",
-  "patch_sha256": "2edfca1bd7e1ec9d32e3afeba2ec65a7cb99e6580703c4c65f989fcac77025f8",
+  "patch_sha256": "79c9efb7f57a2c013d598e57e4e57777f85ca9820cb30cafb32c10533a8d281b",
   "files": [
     {
       "path": "docs/plugins/architecture.md",
       "original_sha256": "d33a84546599fafc73f2101d2c3ef1fc2399569544cd5d2e6793a9c316fcc8b4",
-      "patched_sha256": "03410620fcb633e1c2159c044809bc07e1d1f9d93ed8c4b6b9664ce7bfabfd30"
+      "patched_sha256": "e770ae601ec5affb41bc875962f0b1baea195039fdd8ffa6ad9c33296f2bad1f"
+    },
+    {
+      "path": "extensions/codex/src/app-server/before-agent-run.ts",
+      "original_sha256": null,
+      "patched_sha256": "bf324a0e060fe3ab41676715d7dc5b7688f954876413df43ce9e2579b8c96b81"
+    },
+    {
+      "path": "extensions/codex/src/app-server/run-attempt-context.ts",
+      "original_sha256": "c5ed1ca0ff604a87d278defec5ddcc63cba8851def8d3bec9148b6e067293367",
+      "patched_sha256": "a2566ad1816f4c32b3c855168a8778c7579c4b84822ca1f88739a4af0ce29f8e"
+    },
+    {
+      "path": "extensions/codex/src/app-server/run-attempt-turn-request.ts",
+      "original_sha256": "99d9652678fbc84c92541ec60478c7fb1a1f1cbdb1d8fa702b21f53b50f98d8c",
+      "patched_sha256": "8b4d5ccdb298421c3184c40c50fd3c1c491c25692819b21adc47d2a9853db289"
+    },
+    {
+      "path": "extensions/codex/src/app-server/run-attempt-turn-start.ts",
+      "original_sha256": "7647fa9193ba99711e5a88cdb84bea75051f92ae018e2c137052e1c6e1fa9714",
+      "patched_sha256": "aed513e93767cf3862720fe7c9c6820b82afc3518f0fa83a71e1897826118c05"
+    },
+    {
+      "path": "extensions/codex/src/app-server/run-attempt.auth-context.test.ts",
+      "original_sha256": "edd30e0edb5ddfe45187f3d90b81860cb51f36bfbfc7313a64a16fc7bf7994f4",
+      "patched_sha256": "6cf5a700a20bfa21c397886f428b7c50b28c687653ccd27fd7ea0b8540b671bb"
     },
     {
       "path": "src/agents/cli-runner.ts",
@@ -56,6 +81,16 @@
       "path": "src/agents/harness/lifecycle-hook-helpers.test.ts",
       "original_sha256": "7972404146e0681d15bc631246a5d6deadb5d214a93ff3629f4147a10148c7ed",
       "patched_sha256": "2c9e966bfa8098f3b39fd39d6266a945b7807c05ea11b21968b09400e25e8383"
+    },
+    {
+      "path": "src/plugin-sdk/agent-harness-runtime.test.ts",
+      "original_sha256": "b72a3e657fac008bc7e198c6f8e8c8fd3cae70f0debd9ce728998ab6d4bcd430",
+      "patched_sha256": "558cf5395a8fc08cc21e2707062ce00e31b6b6d12470e6ea10a8f176f0ec4d1a"
+    },
+    {
+      "path": "src/plugin-sdk/agent-harness-runtime.ts",
+      "original_sha256": "881897f486a14ca648225d1214cc2247b28f156527a6aaa3700cad9bb80ba526",
+      "patched_sha256": "73bb87c22b2de9eb91a7bfc1adb3a3277e14cbc66713433e1578539c059053a5"
     },
     {
       "path": "src/plugins/hook-agent-context.test.ts",
