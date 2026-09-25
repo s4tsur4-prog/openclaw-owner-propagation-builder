@@ -120,6 +120,7 @@ describe("Router real native submission gate", () => {
           return { ...threadStartResult(), model, modelProvider: "openai" };
         }
         if (method === "turn/start") started.resolve();
+        return undefined;
       });
       const run = runCodexAppServerAttempt(params);
       await Promise.race([
@@ -164,6 +165,7 @@ describe("Router real native submission gate", () => {
       const harness = createStartedThreadHarness(async (method) => {
         if (method === "thread/start")
           return { ...threadStartResult(), model: params.modelId, modelProvider: "openai" };
+        return undefined;
       });
       const result = await runCodexAppServerAttempt(params);
       expect(result.terminal).toMatchObject({ kind: "failed", source: "hook:before_agent_run" });
@@ -178,6 +180,7 @@ describe("Router real native submission gate", () => {
     const harness = createStartedThreadHarness(async (method) => {
       if (method === "thread/start")
         return { ...threadStartResult(), model: "gpt-5.6-sol", modelProvider: "openai" };
+      return undefined;
     });
     const result = await runCodexAppServerAttempt(params);
     expect(params.modelId).toBe("gpt-6-astra");

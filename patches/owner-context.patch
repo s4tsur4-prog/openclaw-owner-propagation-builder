@@ -653,10 +653,10 @@ index 984d2a8a..7f3738c9 100644
              persistAssistantTranscript:
 diff --git a/src/agents/embedded-agent-runner/run.owner-hook-context.integration.test.ts b/src/agents/embedded-agent-runner/run.owner-hook-context.integration.test.ts
 new file mode 100644
-index 00000000..bfc5d279
+index 00000000..b3c91ae7
 --- /dev/null
 +++ b/src/agents/embedded-agent-runner/run.owner-hook-context.integration.test.ts
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,161 @@
 +import { afterEach, beforeEach, describe, expect, it } from "vitest";
 +import { buildAgentHookContextChannelFields } from "../../plugins/hook-agent-context.js";
 +import type { OpenClawTestState } from "../../test-utils/openclaw-test-state.js";
@@ -678,6 +678,9 @@ index 00000000..bfc5d279
 +describe("runEmbeddedAgent current-run owner hook authority", () => {
 +  beforeEach(async () => {
 +    resetSharedRunIntegrationHarnessMocks();
++    // The shared reset deliberately leaves model-selection history intact.
++    mockedGlobalHookRunner.runBeforeModelResolve.mockReset();
++    mockedGlobalHookRunner.runBeforeModelResolve.mockResolvedValue(undefined);
 +    const { createOpenClawTestState } = await import("../../test-utils/openclaw-test-state.js");
 +    state = await createOpenClawTestState({ label: "owner-hook-context" });
 +    useOpenAIPlatformAuthFixture();
@@ -691,6 +694,8 @@ index 00000000..bfc5d279
 +  });
 +
 +  async function run(overrides: Partial<RunEmbeddedAgentInternalParams> = {}) {
++    const callsBefore = mockedGlobalHookRunner.runBeforeModelResolve.mock.calls.length;
++    const attemptsBefore = mockedRunEmbeddedAttempt.mock.calls.length;
 +    await runEmbeddedAgent({
 +      ...createOverflowRunParams(state),
 +      provider: "openai",
@@ -701,15 +706,22 @@ index 00000000..bfc5d279
 +      trigger: "user",
 +      ...overrides,
 +    });
-+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalled();
++    expect(mockedRunEmbeddedAttempt.mock.calls.length).toBe(attemptsBefore + 1);
++    expect(mockedGlobalHookRunner.runBeforeModelResolve.mock.calls.length).toBe(callsBefore + 1);
 +    const context = mockedGlobalHookRunner.runBeforeModelResolve.mock.lastCall?.[1];
 +    expect(context).toBeDefined();
 +    const dispatchedAttempt = mockedRunEmbeddedAttempt.mock.lastCall?.[0];
 +    expect(dispatchedAttempt).toBeDefined();
-+    expect(buildAgentHookContextChannelFields(dispatchedAttempt!).senderIsOwner).toBe(
-+      context!.senderIsOwner,
++    if (!context || !dispatchedAttempt) {
++      throw new Error("Expected current-run model hook and dispatched attempt");
++    }
++    expect(buildAgentHookContextChannelFields(dispatchedAttempt).senderIsOwner).toBe(
++      context.senderIsOwner,
 +    );
-+    return context!;
++    expect(
++      mockedGlobalHookRunner.runBeforeModelResolve.mock.invocationCallOrder.at(-1),
++    ).toBeLessThan(mockedRunEmbeddedAttempt.mock.invocationCallOrder.at(-1));
++    return context;
 +  }
 +
 +  it.each([true, false, undefined])(
@@ -728,7 +740,40 @@ index 00000000..bfc5d279
 +    expect(owner.senderIsOwner).toBe(true);
 +    expect(nonOwner.senderIsOwner).toBe(false);
 +    expect(unknown.senderIsOwner).toBeUndefined();
-+    expect(mockedGlobalHookRunner.runBeforeModelResolve).toHaveBeenCalledTimes(3);
++    expect(
++      mockedGlobalHookRunner.runBeforeModelResolve.mock.calls.map(([event, context]) => ({
++        prompt: event.prompt,
++        runId: context.runId,
++        sessionKey: context.sessionKey,
++        senderId: context.senderId,
++        senderIsOwner: context.senderIsOwner,
++      })),
++    ).toEqual([
++      {
++        prompt: createOverflowRunParams(state).prompt,
++        runId: "owner",
++        sessionKey: owner.sessionKey,
++        senderId: "sender-a",
++        senderIsOwner: true,
++      },
++      {
++        prompt: createOverflowRunParams(state).prompt,
++        runId: "non-owner",
++        sessionKey: owner.sessionKey,
++        senderId: "sender-b",
++        senderIsOwner: false,
++      },
++      {
++        prompt: createOverflowRunParams(state).prompt,
++        runId: "resumed-unknown",
++        sessionKey: owner.sessionKey,
++        senderId: "sender-a",
++        senderIsOwner: undefined,
++      },
++    ]);
++    // Previously captured contexts must not be mutated by the next run.
++    expect(owner.senderIsOwner).toBe(true);
++    expect(nonOwner.senderIsOwner).toBe(false);
 +  });
 +
 +  it("does not borrow authority across channel or account boundaries", async () => {
@@ -774,7 +819,7 @@ index 00000000..bfc5d279
 +  );
 +});
 diff --git a/src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts b/src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts
-index db97773a..77b2befb 100644
+index db97773a..74531808 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts
 +++ b/src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts
 @@ -1,4 +1,5 @@
@@ -791,7 +836,7 @@ index db97773a..77b2befb 100644
  
  function createRegistry(hooks: PluginHookRegistration[] = []): GlobalHookRunnerRegistry {
    return { hooks: [], typedHooks: hooks, plugins: [] };
-@@ -68,6 +70,66 @@ function createInput(hooks: PluginHookRegistration[] = []) {
+@@ -68,6 +70,69 @@ function createInput(hooks: PluginHookRegistration[] = []) {
  }
  
  describe("runEmbeddedAttemptBeforeAgentRun", () => {
@@ -817,6 +862,7 @@ index db97773a..77b2befb 100644
 +        expect.objectContaining(senderIsOwner === undefined ? {} : { senderIsOwner }),
 +      );
 +      const call = handler.mock.calls[0];
++      if (!call) throw new Error("Expected before_agent_run hook call");
 +      expect(call[0].senderIsOwner).toBe(call[1].senderIsOwner);
 +    },
 +  );
@@ -850,8 +896,10 @@ index db97773a..77b2befb 100644
 +        hookContext: { ...hookContext, ...buildAgentHookContextChannelFields(attempt) },
 +      });
 +      expect(handler).toHaveBeenCalledOnce();
-+      expect(handler.mock.calls[0][0].senderIsOwner).toBeUndefined();
-+      expect(handler.mock.calls[0][1].senderIsOwner).toBeUndefined();
++      const call = handler.mock.calls[0];
++      if (!call) throw new Error("Expected before_agent_run hook call");
++      expect(call[0].senderIsOwner).toBeUndefined();
++      expect(call[1].senderIsOwner).toBeUndefined();
 +    },
 +  );
 +

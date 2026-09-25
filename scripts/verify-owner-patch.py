@@ -28,7 +28,7 @@ initial_receipt = {
 
 STAGES = ["prepare", "router", "targeted", "native", "build", "check", "core-types", "extension-types", "ingress", "wider", "contracts"]
 STAGE = sys.argv[1] if len(sys.argv) == 2 else "summary"
-assert STAGE in [*STAGES, "summary", "package"], STAGE
+assert STAGE in [*STAGES, "summary", "focused-summary", "package"], STAGE
 receipt_path = OUT / "receipt.json"
 receipt = json.loads(receipt_path.read_text()) if receipt_path.exists() else initial_receipt
 assert receipt["workflow_commit"] == os.environ["GITHUB_SHA"]
@@ -89,16 +89,9 @@ def assert_hashes(which):
 
 def tests(name, paths, native=False):
     output = OUT / (name + ".json")
-    if native:
-        config = OUT / "native-vitest.config.mjs"
-        config.write_text(
-            "import { createScopedVitestConfig } from " +
-            json.dumps(str(SOURCE / "test/vitest/vitest.scoped-config.ts")) + ";\n" +
-            "export default createScopedVitestConfig(" + json.dumps(paths) +
-            ', { dir: "extensions", fileParallelism: false, name: "owner-native", passWithNoTests: false, setupFiles: ["test/setup.extensions.ts"] });\n')
-        args = ["node", "scripts/run-vitest.mjs", "run", "--config", str(config), "--maxWorkers=1"]
-    else:
-        args = ["pnpm", "test", *paths]
+    # Canonical routing carries the upstream Codex-specific startup watchdog.
+    # Custom configs silently lose it and are killed after 120s of transform.
+    args = ["pnpm", "test", *paths]
     code = run(name, [*args, "--reporter=default", "--reporter=json", "--outputFile", str(output)])
     data = json.loads(output.read_text()) if output.exists() else {}
     totals = {k: data.get(k) for k in ["numTotalTests", "numPassedTests", "numFailedTests", "numPendingTests", "success"]}
@@ -171,6 +164,11 @@ def execute_stage():
     elif STAGE == "build":
         run("build", ["pnpm", "build"])
     elif STAGE == "check":
+        # Frozen comparison ref, not moving upstream main; all ratchets stay enabled.
+        assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=SOURCE, text=True).strip() == BASE
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/main", BASE], cwd=SOURCE, check=True)
+        receipt["check_comparison_base"] = BASE
+        save()
         run("check", ["pnpm", "check"])
     elif STAGE == "core-types":
         run("core-test-types", ["pnpm", "tsgo:core:test"])
@@ -222,12 +220,15 @@ def execute_stage():
 
 
 save()
-if STAGE == "summary":
-    complete = all(receipt["stages"].get(stage, {}).get("status") == "passed" for stage in STAGES)
+if STAGE in ("summary", "focused-summary"):
+    required = STAGES if STAGE == "summary" else ["prepare", "targeted", "native", "core-types", "extension-types", "check"]
+    complete = all(receipt["stages"].get(stage, {}).get("status") == "passed" for stage in required)
     if receipt["stages"].get("prepare", {}).get("status") == "passed":
         assert_hashes("patched")
-    receipt["missing_or_failed_stages"] = [stage for stage in STAGES if receipt["stages"].get(stage, {}).get("status") != "passed"]
+    receipt["missing_or_failed_stages"] = [stage for stage in required if receipt["stages"].get(stage, {}).get("status") != "passed"]
     receipt["conclusion"] = "CHECKS_PASS_REVIEW_REQUIRED" if complete else "BLOCKED_CHECKS_FAILED_OR_INCOMPLETE"
+    if STAGE == "focused-summary" and complete:
+        receipt["conclusion"] = "FOCUSED_PASS_FULL_REGRESSION_REQUIRED"
     save()
     print("FINAL_RECEIPT\n" + json.dumps(receipt, indent=2), flush=True)
     sys.exit(0 if complete else 1)

@@ -1,6 +1,6 @@
 {
   "base_commit": "3a9d69db306cd7f081e06254cb89c4bcc14a7107",
-  "patch_sha256": "79c9efb7f57a2c013d598e57e4e57777f85ca9820cb30cafb32c10533a8d281b",
+  "patch_sha256": "d081a6fba2de6f255ded0787dd77cd7e17e55cde8a107302664fd49cc18b2fea",
   "files": [
     {
       "path": "docs/plugins/architecture.md",
@@ -50,12 +50,12 @@
     {
       "path": "src/agents/embedded-agent-runner/run.owner-hook-context.integration.test.ts",
       "original_sha256": null,
-      "patched_sha256": "c1cba8dc133b393f862e150a3cf73153aee36f352f0ef475f1ee0925996b52e1"
+      "patched_sha256": "310c120b4e4236b5dadb42dd2030c90043b43a1d9e6a1d0321116ea09f742744"
     },
     {
       "path": "src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts",
       "original_sha256": "c2bcaabcbffb838198bde49537e1fdc4872e648445f33dd34426c2cff9f4217b",
-      "patched_sha256": "a4443a698aa55941a290a73077d57774bcb2b6954c832c4ffa42cd54f695c692"
+      "patched_sha256": "44f54dd77d1903886cc0d63cc7f0eb3e335130439d7513f85bd4ab61ca7820b4"
     },
     {
       "path": "src/agents/embedded-agent-runner/run/attempt-before-agent-run.ts",
