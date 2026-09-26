@@ -1,0 +1,88 @@
+name: Owner focused affected-scope verification
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/owner-focused.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: owner-focused-verification
+  cancel-in-progress: false
+jobs:
+  replacement-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact candidate inputs
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 550ae959b597b874ac4ce45fb220a8f35ddb6620
+          persist-credentials: false
+      - name: Checkout workflow-only replacement tools
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: replacement-tools
+          sparse-checkout: verification
+          persist-credentials: false
+      - name: Verify public builder and record runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p receipts
+          python3 - <<'PY'
+          import json, os
+          event = json.load(open(os.environ["GITHUB_EVENT_PATH"]))
+          assert event["repository"]["private"] is False, "public standard runner only"
+          PY
+          { uname -a; lscpu; free -h; df -h; } > receipts/runner-initial.txt
+          printf 'workflow_commit=%s\nrun_id=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > receipts/workflow.txt
+      - name: Fetch and verify exact canonical source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source remote add origin https://github.com/openclaw/openclaw.git
+          git -C source fetch --depth=1 origin refs/tags/v2026.9.4:refs/tags/v2026.9.4
+          test "$(git -C source rev-parse 'v2026.9.4^{commit}')" = 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          git -C source checkout --detach 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          test "$(git -C source remote get-url origin)" = https://github.com/openclaw/openclaw.git
+          test "$(git -C source rev-parse HEAD)" = 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          test -z "$(git -C source status --porcelain)"
+          { git -C source remote -v; git -C source rev-parse HEAD; git -C source rev-parse 'v2026.9.4^{commit}'; } > receipts/source.txt
+      - name: Setup compatible pinned Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+      - name: Setup repository-pinned pnpm
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node -e 'const p=require("./package.json"); if(p.version!=="2026.9.4" || !p.packageManager.startsWith("pnpm@12.3.4+sha512.")) process.exit(1); console.log(p.engines,p.packageManager)'
+          npm install --global pnpm@12.3.4
+          test "$(pnpm --version)" = 12.3.4
+          node --version
+          pnpm --version
+      - name: Prepare exact candidate, source integrity and frozen install
+        id: prepare
+        run: python3 replacement-tools/verification/verify-replacement.py prepare
+      - name: Tooling regression including exact upstream JSONC
+        run: python3 replacement-tools/verification/test_audit_scope.py
+      - name: Router syntax and tests
+        run: python3 replacement-tools/verification/verify-replacement.py router
+      - name: Focused affected-scope format and lint only
+        run: python3 replacement-tools/verification/verify-replacement.py scope
+      - name: Final focused source integrity and required check reconciliation
+        run: python3 replacement-tools/verification/focused-final.py
+      - name: Preserve focused evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-focused-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/
+            receipts/
+          if-no-files-found: error
+          retention-days: 30
