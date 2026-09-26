@@ -1,8 +1,5 @@
 name: Owner controlled replacement verification
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/owner-replacement.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,7 +14,7 @@ jobs:
       - name: Checkout exact candidate inputs
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 88a818f49858753eecb02a28623c4d8fb574a939
+          ref: 550ae959b597b874ac4ce45fb220a8f35ddb6620
           persist-credentials: false
       - name: Checkout workflow-only replacement tools
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

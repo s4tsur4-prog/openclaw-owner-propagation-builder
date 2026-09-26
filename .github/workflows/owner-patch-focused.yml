@@ -1,26 +1,12 @@
-# Legacy pnpm-check workflow retired by the focused-only verification policy.
-# The one-time guard run cancels any predecessor in this concurrency group.
-name: Retire legacy Owner candidate focused repair
+# Legacy full pnpm-check workflow retired; manual no-op only.
+name: Retired Owner candidate focused repair
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/owner-patch-focused.yml']
   workflow_dispatch:
 permissions:
   contents: read
-  actions: write
-concurrency:
-  group: retire-legacy-owner-check
-  cancel-in-progress: true
 jobs:
-  legacy-stop-guard:
+  legacy-retired:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Cancel explicitly identified unintended legacy run
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api --method POST repos/s4tsur4-prog/openclaw-owner-propagation-builder/actions/runs/36230590417/force-cancel
-      - name: Legacy verification retired
-        run: echo 'Legacy verification stopped. Use owner-focused.yml; no checks executed here.' 
+      - run: echo 'Retired. Use owner-focused.yml. No verification executed.'

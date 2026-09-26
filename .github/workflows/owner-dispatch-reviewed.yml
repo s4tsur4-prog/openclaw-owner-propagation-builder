@@ -1,0 +1,40 @@
+name: Dispatch focused-approved Owner verification
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/owner-dispatch-reviewed.yml']
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: owner-reviewed-dispatch
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify focused approval and stopped legacy run, then dispatch once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TOOLING_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$REPO" = s4tsur4-prog/openclaw-owner-propagation-builder
+          gh api "repos/$REPO/actions/runs/36230590434" > focused.json
+          gh api "repos/$REPO/actions/runs/36230590417" > legacy.json
+          python3 - <<'PY'
+          import json
+          focused = json.load(open('focused.json'))
+          assert focused['status'] == 'completed' and focused['conclusion'] == 'success'
+          assert focused['head_sha'] == 'a531a14c9736e224efcc2b33065b70553ce47c9d'
+          assert focused['path'] == '.github/workflows/owner-focused.yml'
+          legacy = json.load(open('legacy.json'))
+          assert legacy['status'] == 'completed' and legacy['conclusion'] == 'cancelled'
+          PY
+          test "$(gh api "repos/$REPO/git/ref/heads/main" --jq .object.sha)" = "$TOOLING_SHA"
+          test "$(gh api "repos/$REPO/actions/workflows/owner-replacement.yml/runs?head_sha=$TOOLING_SHA&event=workflow_dispatch" --jq .total_count)" = 0
+          gh api --method POST "repos/$REPO/actions/workflows/owner-replacement.yml/dispatches" -f ref=main
+          echo 'Fresh workflow_dispatch submitted. No rerun requested.'
