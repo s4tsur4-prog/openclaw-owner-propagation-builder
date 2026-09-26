@@ -21,6 +21,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --method POST repos/s4tsur4-prog/openclaw-owner-propagation-builder/actions/runs/36230590417/cancel
+          gh api --method POST repos/s4tsur4-prog/openclaw-owner-propagation-builder/actions/runs/36230590417/force-cancel
       - name: Legacy verification retired
         run: echo 'Legacy verification stopped. Use owner-focused.yml; no checks executed here.' 
