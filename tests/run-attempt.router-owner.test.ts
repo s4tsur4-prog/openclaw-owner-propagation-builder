@@ -22,7 +22,9 @@ type Hook = Parameters<typeof createMockPluginRegistry>[0][number];
 
 async function router(params: ReturnType<typeof createParams>) {
   const routerDir = process.env.OPENCLAW_ROUTER_TEST_DIR;
-  if (!routerDir) throw new Error("OPENCLAW_ROUTER_TEST_DIR is required");
+  if (!routerDir) {
+    throw new Error("OPENCLAW_ROUTER_TEST_DIR is required");
+  }
   const dir = await fs.mkdtemp(path.join(tempDir, "router-native-"));
   let source = await fs.readFile(path.join(routerDir, "index.js"), "utf8");
   source = source.replace(
@@ -65,7 +67,9 @@ async function router(params: ReturnType<typeof createParams>) {
   return {
     async select() {
       const hook = hooks.find((item) => item.hookName === "before_model_resolve");
-      if (!hook) throw new Error("selection hook missing");
+      if (!hook) {
+        throw new Error("selection hook missing");
+      }
       // The prior selection is tested separately in the canonical orchestrator bridge.
       const handler = hook.handler as (event: { prompt: string }, ctx: typeof context) => unknown;
       return await handler({ prompt: params.prompt }, context);
@@ -119,7 +123,9 @@ describe("Router real native submission gate", () => {
           expect(request).toMatchObject({ model });
           return { ...threadStartResult(), model, modelProvider: "openai" };
         }
-        if (method === "turn/start") started.resolve();
+        if (method === "turn/start") {
+          started.resolve();
+        }
         return undefined;
       });
       const run = runCodexAppServerAttempt(params);
@@ -155,16 +161,23 @@ describe("Router real native submission gate", () => {
     async (scenario) => {
       const params = paramsForCase();
       const plugin = await router(params);
-      if (scenario !== "selection-missing") await plugin.select();
+      if (scenario !== "selection-missing") {
+        await plugin.select();
+      }
       if (scenario === "effective-mismatch") {
         params.modelId = "gpt-5.6-sol";
         params.model = { ...params.model, id: "gpt-5.6-sol" };
       }
-      if (scenario === "non-owner") params.senderIsOwner = false;
-      if (scenario === "unknown-owner") params.senderIsOwner = undefined;
+      if (scenario === "non-owner") {
+        params.senderIsOwner = false;
+      }
+      if (scenario === "unknown-owner") {
+        params.senderIsOwner = undefined;
+      }
       const harness = createStartedThreadHarness(async (method) => {
-        if (method === "thread/start")
+        if (method === "thread/start") {
           return { ...threadStartResult(), model: params.modelId, modelProvider: "openai" };
+        }
         return undefined;
       });
       const result = await runCodexAppServerAttempt(params);
@@ -178,8 +191,9 @@ describe("Router real native submission gate", () => {
     const plugin = await router(params);
     await plugin.select();
     const harness = createStartedThreadHarness(async (method) => {
-      if (method === "thread/start")
+      if (method === "thread/start") {
         return { ...threadStartResult(), model: "gpt-5.6-sol", modelProvider: "openai" };
+      }
       return undefined;
     });
     const result = await runCodexAppServerAttempt(params);

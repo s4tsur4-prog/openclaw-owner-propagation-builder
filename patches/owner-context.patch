@@ -828,7 +828,7 @@ index 00000000..706c7a14
 +  );
 +});
 diff --git a/src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts b/src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts
-index db97773a..74531808 100644
+index db97773a..10f2ab59 100644
 --- a/src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts
 +++ b/src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts
 @@ -1,4 +1,5 @@
@@ -845,7 +845,7 @@ index db97773a..74531808 100644
  
  function createRegistry(hooks: PluginHookRegistration[] = []): GlobalHookRunnerRegistry {
    return { hooks: [], typedHooks: hooks, plugins: [] };
-@@ -68,6 +70,69 @@ function createInput(hooks: PluginHookRegistration[] = []) {
+@@ -68,6 +70,73 @@ function createInput(hooks: PluginHookRegistration[] = []) {
  }
  
  describe("runEmbeddedAttemptBeforeAgentRun", () => {
@@ -871,7 +871,9 @@ index db97773a..74531808 100644
 +        expect.objectContaining(senderIsOwner === undefined ? {} : { senderIsOwner }),
 +      );
 +      const call = handler.mock.calls[0];
-+      if (!call) throw new Error("Expected before_agent_run hook call");
++      if (!call) {
++        throw new Error("Expected before_agent_run hook call");
++      }
 +      expect(call[0].senderIsOwner).toBe(call[1].senderIsOwner);
 +    },
 +  );
@@ -906,7 +908,9 @@ index db97773a..74531808 100644
 +      });
 +      expect(handler).toHaveBeenCalledOnce();
 +      const call = handler.mock.calls[0];
-+      if (!call) throw new Error("Expected before_agent_run hook call");
++      if (!call) {
++        throw new Error("Expected before_agent_run hook call");
++      }
 +      expect(call[0].senderIsOwner).toBeUndefined();
 +      expect(call[1].senderIsOwner).toBeUndefined();
 +    },

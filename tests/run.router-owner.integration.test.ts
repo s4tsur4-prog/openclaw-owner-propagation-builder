@@ -35,8 +35,9 @@ describe("patched canonical core and Router V1 owner bridge", () => {
     mockedBuildEmbeddedRunPayloads.mockReturnValue([{ text: "OK" }]);
     mockedRunEmbeddedAttempt.mockResolvedValue(makeAttemptResult({ assistantTexts: ["OK"] }));
     const routerDir = process.env.OPENCLAW_ROUTER_TEST_DIR;
-    if (!routerDir)
+    if (!routerDir) {
       throw new Error("OPENCLAW_ROUTER_TEST_DIR must identify audited isolated Router source");
+    }
     dir = await fs.mkdtemp(path.join(process.env.TMPDIR || "/tmp", "router-core-bridge-"));
     let source = await fs.readFile(path.join(routerDir, "index.js"), "utf8");
     // Only definition packaging is shimmed; every Router handler is the staged source.
@@ -94,7 +95,9 @@ describe("patched canonical core and Router V1 owner bridge", () => {
 
   afterEach(async () => {
     await state?.cleanup();
-    if (dir) await fs.rm(dir, { recursive: true, force: true });
+    if (dir) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   function run(overrides: Partial<RunEmbeddedAgentInternalParams> = {}) {

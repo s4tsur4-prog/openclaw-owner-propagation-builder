@@ -1,6 +1,6 @@
 {
   "base_commit": "3a9d69db306cd7f081e06254cb89c4bcc14a7107",
-  "patch_sha256": "62d0ed2ec72c1ed2824198a91852b8336a91cd148f79f4ddc03cd0841a072fa8",
+  "patch_sha256": "1484debeab4967354e6cbcfda5ea3c03ad41ed1b5f9b9d304c48ccb4fa6b6dd7",
   "files": [
     {
       "path": "docs/plugins/architecture.md",
@@ -55,7 +55,7 @@
     {
       "path": "src/agents/embedded-agent-runner/run/attempt-before-agent-run.test.ts",
       "original_sha256": "c2bcaabcbffb838198bde49537e1fdc4872e648445f33dd34426c2cff9f4217b",
-      "patched_sha256": "44f54dd77d1903886cc0d63cc7f0eb3e335130439d7513f85bd4ab61ca7820b4"
+      "patched_sha256": "3d058cde5fa3e52a1d95b8c2600fad3c5fb1fe9a7af88f7febef29d8072f6bec"
     },
     {
       "path": "src/agents/embedded-agent-runner/run/attempt-before-agent-run.ts",
