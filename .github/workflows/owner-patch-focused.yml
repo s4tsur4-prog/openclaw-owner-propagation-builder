@@ -1,153 +1,20 @@
-name: Owner candidate focused repair
+# Legacy pnpm-check workflow retired by the focused-only verification policy.
+# The one-time guard run cancels any predecessor in this concurrency group.
+name: Retire legacy Owner candidate focused repair
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/owner-patch-focused.yml', 'patches/**', 'router/**', 'tests/**', 'scripts/verify-owner-patch.py']
+    paths: ['.github/workflows/owner-patch-focused.yml']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
   group: owner-patch-regression
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
-  owner-patch:
+  legacy-stop-guard:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 2
     steps:
-      - name: Checkout builder
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Verify public builder and record runner
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p receipts
-          python3 - <<'PY'
-          import json, os
-          event = json.load(open(os.environ["GITHUB_EVENT_PATH"]))
-          assert event["repository"]["private"] is False, "public standard runner only"
-          PY
-          { uname -a; lscpu; free -h; df -h; } > receipts/runner-initial.txt
-          printf 'workflow_commit=%s\nrun_id=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > receipts/workflow.txt
-      - name: Fetch and verify exact canonical source
-        shell: bash
-        run: |
-          set -euo pipefail
-          git init source
-          git -C source remote add origin https://github.com/openclaw/openclaw.git
-          git -C source fetch --depth=1 origin refs/tags/v2026.9.4:refs/tags/v2026.9.4
-          test "$(git -C source rev-parse 'v2026.9.4^{commit}')" = 3a9d69db306cd7f081e06254cb89c4bcc14a7107
-          git -C source checkout --detach 3a9d69db306cd7f081e06254cb89c4bcc14a7107
-          test "$(git -C source remote get-url origin)" = https://github.com/openclaw/openclaw.git
-          test "$(git -C source rev-parse HEAD)" = 3a9d69db306cd7f081e06254cb89c4bcc14a7107
-          test -z "$(git -C source status --porcelain)"
-          { git -C source remote -v; git -C source rev-parse HEAD; git -C source rev-parse 'v2026.9.4^{commit}'; } > receipts/source.txt
-      - name: Setup compatible pinned Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24.21.0'
-      - name: Setup repository-pinned pnpm
-        shell: bash
-        working-directory: source
-        run: |
-          set -euo pipefail
-          node -e 'const p=require("./package.json"); if(p.version!=="2026.9.4" || !p.packageManager.startsWith("pnpm@12.3.4+sha512.")) process.exit(1); console.log(p.engines,p.packageManager)'
-          npm install --global pnpm@12.3.4
-          test "$(pnpm --version)" = 12.3.4
-          node --version
-          pnpm --version
-      - name: Prepare exact clean baseline and apply verified patch
-        id: prepare
-        run: python3 scripts/verify-owner-patch.py prepare
-      - name: Targeted core owner hooks and SDK
-        if: ${{ always() && steps.prepare.outcome == 'success' }}
-        run: python3 scripts/verify-owner-patch.py targeted
-      - name: Preserve targeted receipts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: owner-focused-targeted-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            owner-receipts/receipt.json
-            owner-receipts/targeted-core*
-            owner-receipts/router-core-bridge*
-          if-no-files-found: error
-          retention-days: 30
-      - name: Native submission gates and Router bridge
-        if: ${{ always() && steps.prepare.outcome == 'success' }}
-        run: python3 scripts/verify-owner-patch.py native
-      - name: Preserve native receipts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: owner-focused-native-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            owner-receipts/receipt.json
-            owner-receipts/native-router-and-gates*
-          if-no-files-found: error
-          retention-days: 30
-      - name: Core test types
-        if: ${{ always() && steps.prepare.outcome == 'success' }}
-        run: python3 scripts/verify-owner-patch.py core-types
-      - name: Preserve core-types receipts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: owner-focused-core-types-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            owner-receipts/receipt.json
-            owner-receipts/core-test-types*
-          if-no-files-found: error
-          retention-days: 30
-      - name: Extension test types
-        if: ${{ always() && steps.prepare.outcome == 'success' }}
-        run: python3 scripts/verify-owner-patch.py extension-types
-      - name: Preserve extension-types receipts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: owner-focused-extension-types-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            owner-receipts/receipt.json
-            owner-receipts/extension-test-types*
-          if-no-files-found: error
-          retention-days: 30
-      - name: Patched source check
-        if: ${{ always() && steps.prepare.outcome == 'success' }}
-        run: python3 scripts/verify-owner-patch.py check
-      - name: Preserve check receipts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: owner-focused-check-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            owner-receipts/receipt.json
-            owner-receipts/check.log
-          if-no-files-found: error
-          retention-days: 30
-      - name: Focused gate summary (never package)
-        if: always()
-        run: python3 scripts/verify-owner-patch.py focused-summary
-      - name: Capture safe candidate provenance and hashes
-        if: always()
-        shell: bash
-        run: |
-          mkdir -p owner-receipts
-          cp -r receipts owner-receipts/initial-runner
-          cp -r patches owner-receipts/patches
-          cp -r docs owner-receipts/docs
-          cp -r router owner-receipts/router
-          cp -r tests owner-receipts/tests
-          cp .github/workflows/owner-patch-focused.yml owner-receipts/workflow.yml
-          cp scripts/verify-owner-patch.py owner-receipts/verify-owner-patch.py
-          cd owner-receipts
-          find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS
-      - name: Upload draft patch and regression evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: owner-focused-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: owner-receipts/
-          if-no-files-found: error
-          retention-days: 30
+      - name: Legacy verification retired
+        run: echo 'Legacy verification stopped. Use owner-focused.yml; no checks executed here.'
