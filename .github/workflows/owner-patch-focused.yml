@@ -8,13 +8,19 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: write
 concurrency:
-  group: owner-patch-regression
+  group: retire-legacy-owner-check
   cancel-in-progress: true
 jobs:
   legacy-stop-guard:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: Cancel explicitly identified unintended legacy run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST repos/s4tsur4-prog/openclaw-owner-propagation-builder/actions/runs/36230590417/cancel
       - name: Legacy verification retired
-        run: echo 'Legacy verification stopped. Use owner-focused.yml; no checks executed here.'
+        run: echo 'Legacy verification stopped. Use owner-focused.yml; no checks executed here.' 
