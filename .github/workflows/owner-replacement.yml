@@ -1,0 +1,245 @@
+name: Owner controlled replacement verification
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/owner-replacement.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: owner-replacement-verification
+  cancel-in-progress: false
+jobs:
+  replacement-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact candidate inputs
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 88a818f49858753eecb02a28623c4d8fb574a939
+          persist-credentials: false
+      - name: Checkout workflow-only replacement tools
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: replacement-tools
+          sparse-checkout: verification
+          persist-credentials: false
+      - name: Verify public builder and record runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p receipts
+          python3 - <<'PY'
+          import json, os
+          event = json.load(open(os.environ["GITHUB_EVENT_PATH"]))
+          assert event["repository"]["private"] is False, "public standard runner only"
+          PY
+          { uname -a; lscpu; free -h; df -h; } > receipts/runner-initial.txt
+          printf 'workflow_commit=%s\nrun_id=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > receipts/workflow.txt
+      - name: Fetch and verify exact canonical source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source remote add origin https://github.com/openclaw/openclaw.git
+          git -C source fetch --depth=1 origin refs/tags/v2026.9.4:refs/tags/v2026.9.4
+          test "$(git -C source rev-parse 'v2026.9.4^{commit}')" = 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          git -C source checkout --detach 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          test "$(git -C source remote get-url origin)" = https://github.com/openclaw/openclaw.git
+          test "$(git -C source rev-parse HEAD)" = 3a9d69db306cd7f081e06254cb89c4bcc14a7107
+          test -z "$(git -C source status --porcelain)"
+          { git -C source remote -v; git -C source rev-parse HEAD; git -C source rev-parse 'v2026.9.4^{commit}'; } > receipts/source.txt
+      - name: Setup compatible pinned Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+      - name: Setup repository-pinned pnpm
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node -e 'const p=require("./package.json"); if(p.version!=="2026.9.4" || !p.packageManager.startsWith("pnpm@12.3.4+sha512.")) process.exit(1); console.log(p.engines,p.packageManager)'
+          npm install --global pnpm@12.3.4
+          test "$(pnpm --version)" = 12.3.4
+          node --version
+          pnpm --version
+      - name: Prepare exact candidate, source integrity and frozen install
+        id: prepare
+        run: python3 replacement-tools/verification/verify-replacement.py prepare
+      - name: Replacement gate router
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: python3 replacement-tools/verification/verify-replacement.py router
+      - name: Preserve router gate receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-replacement-router-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/*receipt.json
+            owner-receipts/*.log
+            owner-receipts/*.jsonl
+            owner-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Replacement gate targeted
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: python3 replacement-tools/verification/verify-replacement.py targeted
+      - name: Preserve targeted gate receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-replacement-targeted-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/*receipt.json
+            owner-receipts/*.log
+            owner-receipts/*.jsonl
+            owner-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Replacement gate native
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: python3 replacement-tools/verification/verify-replacement.py native
+      - name: Preserve native gate receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-replacement-native-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/*receipt.json
+            owner-receipts/*.log
+            owner-receipts/*.jsonl
+            owner-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Replacement gate build
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: python3 replacement-tools/verification/verify-replacement.py build
+      - name: Preserve build gate receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-replacement-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/*receipt.json
+            owner-receipts/*.log
+            owner-receipts/*.jsonl
+            owner-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Replacement gate core-types
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: python3 replacement-tools/verification/verify-replacement.py core-types
+      - name: Preserve core-types gate receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-replacement-core-types-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/*receipt.json
+            owner-receipts/*.log
+            owner-receipts/*.jsonl
+            owner-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Replacement gate extension-types
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: python3 replacement-tools/verification/verify-replacement.py extension-types
+      - name: Preserve extension-types gate receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-replacement-extension-types-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/*receipt.json
+            owner-receipts/*.log
+            owner-receipts/*.jsonl
+            owner-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Replacement gate ingress
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: python3 replacement-tools/verification/verify-replacement.py ingress
+      - name: Preserve ingress gate receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-replacement-ingress-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/*receipt.json
+            owner-receipts/*.log
+            owner-receipts/*.jsonl
+            owner-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Replacement gate wider
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: python3 replacement-tools/verification/verify-replacement.py wider
+      - name: Preserve wider gate receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-replacement-wider-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/*receipt.json
+            owner-receipts/*.log
+            owner-receipts/*.jsonl
+            owner-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Replacement gate contracts
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: python3 replacement-tools/verification/verify-replacement.py contracts
+      - name: Preserve contracts gate receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-replacement-contracts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/*receipt.json
+            owner-receipts/*.log
+            owner-receipts/*.jsonl
+            owner-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Replacement gate scope
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: python3 replacement-tools/verification/verify-replacement.py scope
+      - name: Preserve scope gate receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-replacement-scope-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            owner-receipts/*receipt.json
+            owner-receipts/*.log
+            owner-receipts/*.jsonl
+            owner-receipts/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Final replacement verification and full source integrity
+        id: summary
+        if: always()
+        run: python3 replacement-tools/verification/verify-replacement.py summary
+      - name: Package only after every replacement gate passes
+        if: ${{ !cancelled() && steps.summary.outcome == 'success' }}
+        run: python3 replacement-tools/verification/verify-replacement.py package
+      - name: Preserve all evidence and package checksums
+        if: always()
+        run: |
+          mkdir -p owner-receipts
+          cp -r receipts owner-receipts/initial-runner
+          cp -r patches router tests owner-receipts/
+          cp -r replacement-tools/verification owner-receipts/verification-tools
+          { uname -a; free -h; df -h; } > owner-receipts/runner-final.txt
+          cd owner-receipts
+          find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS
+      - name: Upload final evidence and conditional package
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-replacement-final-${{ github.run_id }}-${{ github.run_attempt }}
+          path: owner-receipts/
+          if-no-files-found: error
+          retention-days: 30
